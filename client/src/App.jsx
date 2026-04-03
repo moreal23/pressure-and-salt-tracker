@@ -221,6 +221,21 @@ function formatScannerError(error) {
   return message || 'The camera could not start. You can still use Scan from photo below.'
 }
 
+async function requestCameraPermission() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('This browser does not support camera access.')
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: 'environment' },
+    },
+    audio: false,
+  })
+
+  stream.getTracks().forEach((track) => track.stop())
+}
+
 function SummaryCard({ title, value, helper, tone = 'neutral' }) {
   return (
     <article className={`summary-card summary-card--${tone}`}>
@@ -609,6 +624,8 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
     setLookupState({ loading: true, error: '', message: 'Opening camera...' })
 
     try {
+      await requestCameraPermission()
+
       const { Html5Qrcode } = await import('html5-qrcode')
 
       if (!scannerNodeRef.current) {
@@ -633,7 +650,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
 
       try {
         await scannerInstanceRef.current.start(
-          { facingMode: 'environment' },
+          { facingMode: { ideal: 'environment' } },
           config,
           handleDecodedText,
           () => null
@@ -766,6 +783,10 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
         />
       </div>
 
+      <div className="import-hint">
+        If camera permission is blocked on your phone, use Scan from photo or allow camera access in your browser site settings.
+      </div>
+
       <div id="barcode-scanner" className="scanner-shell" ref={scannerNodeRef} />
 
       <div className="manual-lookup">
@@ -840,6 +861,8 @@ function App() {
   const [fitbitBusy, setFitbitBusy] = useState(false)
   const [goalBadges, setGoalBadges] = useState([])
   const playedBadgeDatesRef = useRef(new Set())
+  const fitbitSyncInFlightRef = useRef(false)
+  const lastAutoSyncAttemptRef = useRef(0)
 
   const foodAssessment = useMemo(() => {
     if (!dashboard) {
@@ -1037,9 +1060,17 @@ function App() {
     }
   }
 
-  async function handleFitbitSync() {
+  async function syncFitbitData(options = {}) {
+    if (fitbitSyncInFlightRef.current) {
+      return
+    }
+
+    fitbitSyncInFlightRef.current = true
     setFitbitBusy(true)
-    setSavingState('Syncing Fitbit data...')
+
+    if (!options.silent) {
+      setSavingState('Syncing Fitbit data...')
+    }
 
     try {
       const result = await fetchJson('/api/fitbit/sync', {
@@ -1051,12 +1082,22 @@ function App() {
         profileName: result.profileName,
         summary: result.summary,
       }))
-      setSavingState('Fitbit data synced.')
+
+      if (!options.silent) {
+        setSavingState('Fitbit data synced.')
+      }
     } catch (error) {
-      setSavingState(error.message)
+      if (!options.silent) {
+        setSavingState(error.message)
+      }
     } finally {
+      fitbitSyncInFlightRef.current = false
       setFitbitBusy(false)
     }
+  }
+
+  async function handleFitbitSync() {
+    await syncFitbitData()
   }
 
   async function handleFitbitDisconnect() {
@@ -1086,6 +1127,41 @@ function App() {
       setFitbitBusy(false)
     }
   }
+
+  useEffect(() => {
+    if (!fitbit.connected || !fitbit.configured) {
+      return
+    }
+
+    const syncIfNeeded = () => {
+      const lastSyncAt = fitbit.summary?.lastSyncAt ? new Date(fitbit.summary.lastSyncAt).getTime() : 0
+      const syncIsStale = !lastSyncAt || Date.now() - lastSyncAt > 5 * 60 * 1000
+      const enoughTimeSinceAttempt = Date.now() - lastAutoSyncAttemptRef.current > 60 * 1000
+
+      if (!syncIsStale || !enoughTimeSinceAttempt || document.visibilityState === 'hidden') {
+        return
+      }
+
+      lastAutoSyncAttemptRef.current = Date.now()
+      syncFitbitData({ silent: true }).catch(() => null)
+    }
+
+    syncIfNeeded()
+
+    const intervalId = window.setInterval(syncIfNeeded, 5 * 60 * 1000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncIfNeeded()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [fitbit.connected, fitbit.configured, fitbit.summary?.lastSyncAt])
 
   async function handleGoalSubmit(event) {
     event.preventDefault()
