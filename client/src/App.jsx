@@ -648,7 +648,7 @@ function App() {
     error: '',
     message: '',
   })
-  const [importText, setImportText] = useState(importExample)
+  const [importText, setImportText] = useState('')
   const [importResult, setImportResult] = useState(null)
   const [screenshotFile, setScreenshotFile] = useState(null)
   const [screenshotFileName, setScreenshotFileName] = useState('')
@@ -1453,6 +1453,7 @@ function App() {
                 id="bpImportText"
                 className="import-textarea"
                 rows="7"
+                placeholder={importExample}
                 value={importText}
                 onChange={(event) => setImportText(event.target.value)}
               />
@@ -1471,7 +1472,7 @@ function App() {
                   type="button"
                   onClick={() => setImportText(importExample)}
                 >
-                  Reset example
+                  Load example
                 </button>
               </div>
             </form>
