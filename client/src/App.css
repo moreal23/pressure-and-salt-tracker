@@ -534,11 +534,27 @@ textarea {
 }
 
 .panel--scanner .scanner-shell {
+  position: relative;
+  width: 100%;
   min-height: 220px;
   border-radius: 22px;
   border: 1px dashed rgba(15, 108, 97, 0.35);
   background: rgba(255, 255, 255, 0.58);
   overflow: hidden;
+}
+
+.panel--scanner .scanner-shell > div,
+.panel--scanner .scanner-shell video,
+.panel--scanner .scanner-shell canvas {
+  width: 100% !important;
+  max-width: 100%;
+}
+
+.panel--scanner .scanner-shell video {
+  min-height: 220px;
+  display: block !important;
+  object-fit: cover;
+  background: #0f1f1f;
 }
 
 .scanner-actions {

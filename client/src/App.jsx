@@ -363,6 +363,35 @@ async function decodeBarcodeFromPhoto(file, scannerNodeRef, scannerInstanceRef) 
   }
 }
 
+function ensureScannerViewport(container) {
+  if (!container) {
+    return
+  }
+
+  const video = container.querySelector('video')
+  const canvas = container.querySelector('canvas')
+  const wrapper = container.firstElementChild
+
+  if (wrapper instanceof HTMLElement) {
+    wrapper.style.width = '100%'
+  }
+
+  if (video instanceof HTMLVideoElement) {
+    video.setAttribute('playsinline', 'true')
+    video.setAttribute('autoplay', 'true')
+    video.setAttribute('muted', 'true')
+    video.muted = true
+    video.style.width = '100%'
+    video.style.height = '100%'
+    video.style.objectFit = 'cover'
+    video.style.display = 'block'
+  }
+
+  if (canvas instanceof HTMLCanvasElement) {
+    canvas.style.maxWidth = '100%'
+  }
+}
+
 async function playCelebrationSound() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext
 
@@ -1221,6 +1250,9 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
           () => null
         )
       }
+
+      ensureScannerViewport(scannerNodeRef.current)
+      window.setTimeout(() => ensureScannerViewport(scannerNodeRef.current), 250)
 
       setScannerReady(true)
       setLookupState({
