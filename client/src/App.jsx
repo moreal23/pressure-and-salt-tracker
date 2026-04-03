@@ -574,10 +574,18 @@ function FitbitPanel({ fitbit, busy, onConnect, onSync, onDisconnect }) {
 function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
   const scannerNodeRef = useRef(null)
   const scannerInstanceRef = useRef(null)
+  const fileInputRef = useRef(null)
   const [manualBarcode, setManualBarcode] = useState('')
   const [scannerReady, setScannerReady] = useState(false)
   const [fileScanBusy, setFileScanBusy] = useState(false)
   const [showCameraHelp, setShowCameraHelp] = useState(false)
+  const [preferPhotoCapture, setPreferPhotoCapture] = useState(false)
+
+  useEffect(() => {
+    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches
+    const isPhoneLikeDevice = /android|iphone|ipad|ipod/i.test(window.navigator.userAgent)
+    setPreferPhotoCapture(isTouchDevice || isPhoneLikeDevice)
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -745,6 +753,15 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
     }
   }
 
+  function handlePrimaryScanAction() {
+    if (preferPhotoCapture) {
+      fileInputRef.current?.click()
+      return
+    }
+
+    startScanner()
+  }
+
   return (
     <section className="panel panel--scanner">
       <div className="panel-heading">
@@ -753,14 +770,15 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
           <h2>Scan packaged food with your camera</h2>
         </div>
         <p className="panel-copy">
-          Open this site on your phone, tap start camera, and scan the barcode.
-          If camera access is blocked, you can type the barcode manually.
+          {preferPhotoCapture
+            ? 'On phones, the main scan button opens your camera or photo picker so you can capture a barcode quickly.'
+            : 'On larger screens, the scanner opens inside the website so you can scan a barcode without leaving the page.'}
         </p>
       </div>
 
       <div className="scanner-actions">
-        <button className="button button--solid" type="button" onClick={startScanner}>
-          Start camera scan
+        <button className="button button--solid" type="button" onClick={handlePrimaryScanAction}>
+          {preferPhotoCapture ? 'Take barcode photo' : 'Start camera scan'}
         </button>
         <button
           className="button button--ghost"
@@ -802,6 +820,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
       <div className="file-scan">
         <label htmlFor="barcodePhoto">Scan from photo</label>
         <input
+          ref={fileInputRef}
           id="barcodePhoto"
           type="file"
           accept="image/*"
