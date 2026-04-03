@@ -1,7 +1,7 @@
 const express = require('express')
 const cors = require('cors')
 const { z } = require('zod')
-const { createHash, randomUUID } = require('node:crypto')
+const { createHash, pbkdf2Sync, randomBytes, randomUUID } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const { attachId, createStore } = require('./storage')
@@ -100,6 +100,11 @@ const privacyClearSchema = z.object({
   currentPin: pinValueSchema,
 })
 
+const authCredentialsSchema = z.object({
+  username: z.string().trim().min(3).max(80),
+  password: z.string().min(6).max(128),
+})
+
 const backupRestoreSchema = z.object({
   data: z.object({
     settings: z.object({
@@ -134,6 +139,9 @@ const fitbitConfig = {
     .filter(Boolean),
 }
 
+const SESSION_COOKIE_NAME = 'pressure_salt_session'
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+
 function isFitbitConfigured() {
   return Boolean(fitbitConfig.clientId && fitbitConfig.clientSecret && fitbitConfig.redirectUri)
 }
@@ -155,6 +163,64 @@ function getFitbitAuthorizationHeader() {
 
 function hashPrivacyPin(pin) {
   return createHash('sha256').update(pin).digest('hex')
+}
+
+function hashPassword(password, salt) {
+  return pbkdf2Sync(password, salt, 120000, 32, 'sha256').toString('hex')
+}
+
+function parseCookies(headerValue = '') {
+  return Object.fromEntries(
+    String(headerValue)
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const [name, ...rest] = part.split('=')
+        return [name, decodeURIComponent(rest.join('='))]
+      })
+  )
+}
+
+function hashSessionToken(token) {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function createSessionCookie(request, token) {
+  const isSecure = request.secure || request.headers['x-forwarded-proto'] === 'https'
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}${isSecure ? '; Secure' : ''}`
+}
+
+function clearSessionCookie(request) {
+  const isSecure = request.secure || request.headers['x-forwarded-proto'] === 'https'
+  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${isSecure ? '; Secure' : ''}`
+}
+
+function getSessionExpiryIso() {
+  return new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000).toISOString()
+}
+
+async function getAuthStatus(request) {
+  const store = await storePromise
+  const authState = await store.getAuthState()
+  const cookies = parseCookies(request.headers.cookie ?? '')
+  const sessionToken = cookies[SESSION_COOKIE_NAME] ?? ''
+  const sessionHash = sessionToken ? hashSessionToken(sessionToken) : ''
+  const hasAccount = Boolean(authState.passwordHash)
+  const authenticated =
+    hasAccount &&
+    Boolean(sessionHash) &&
+    authState.sessionHash === sessionHash &&
+    Boolean(authState.sessionExpiresAt) &&
+    new Date(authState.sessionExpiresAt).getTime() > Date.now()
+
+  return {
+    hasAccount,
+    authenticated,
+    username: authenticated ? authState.username : authState.username ?? '',
+    authState,
+    store,
+  }
 }
 
 function buildFitbitAuthorizeUrl() {
@@ -652,6 +718,125 @@ app.get('/api/health', async (request, response) => {
     ok: true,
     storageMode: store.storageMode,
   })
+})
+
+app.get('/api/auth/status', async (request, response, next) => {
+  try {
+    const auth = await getAuthStatus(request)
+    response.json({
+      hasAccount: auth.hasAccount,
+      authenticated: auth.authenticated,
+      username: auth.authenticated ? auth.username : '',
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/auth/register', async (request, response, next) => {
+  try {
+    const auth = await getAuthStatus(request)
+
+    if (auth.hasAccount) {
+      response.status(400).json({ error: 'An account already exists for this app.' })
+      return
+    }
+
+    const parsed = authCredentialsSchema.parse(request.body)
+    const passwordSalt = randomBytes(16).toString('hex')
+    const passwordHash = hashPassword(parsed.password, passwordSalt)
+    const sessionToken = randomBytes(32).toString('hex')
+    const sessionHash = hashSessionToken(sessionToken)
+    const sessionExpiresAt = getSessionExpiryIso()
+
+    await auth.store.createAuthAccount({
+      username: parsed.username,
+      passwordHash,
+      passwordSalt,
+      sessionHash,
+      sessionExpiresAt,
+    })
+
+    response.setHeader('Set-Cookie', createSessionCookie(request, sessionToken))
+    response.status(201).json({
+      hasAccount: true,
+      authenticated: true,
+      username: parsed.username,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/auth/login', async (request, response, next) => {
+  try {
+    const auth = await getAuthStatus(request)
+
+    if (!auth.hasAccount) {
+      response.status(400).json({ error: 'Create your account first.' })
+      return
+    }
+
+    const parsed = authCredentialsSchema.parse(request.body)
+    const usernameMatches = auth.authState.username === parsed.username
+    const passwordHash = hashPassword(parsed.password, auth.authState.passwordSalt)
+
+    if (!usernameMatches || passwordHash !== auth.authState.passwordHash) {
+      response.status(401).json({ error: 'The username or password did not match.' })
+      return
+    }
+
+    const sessionToken = randomBytes(32).toString('hex')
+    const sessionHash = hashSessionToken(sessionToken)
+    const sessionExpiresAt = getSessionExpiryIso()
+
+    await auth.store.saveAuthSession({ sessionHash, sessionExpiresAt })
+
+    response.setHeader('Set-Cookie', createSessionCookie(request, sessionToken))
+    response.json({
+      hasAccount: true,
+      authenticated: true,
+      username: parsed.username,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/auth/logout', async (request, response, next) => {
+  try {
+    const auth = await getAuthStatus(request)
+    await auth.store.clearAuthSession()
+    response.setHeader('Set-Cookie', clearSessionCookie(request))
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.use('/api', async (request, response, next) => {
+  if (
+    request.path === '/api/health' ||
+    request.path === '/api/auth/status' ||
+    request.path === '/api/auth/register' ||
+    request.path === '/api/auth/login'
+  ) {
+    next()
+    return
+  }
+
+  try {
+    const auth = await getAuthStatus(request)
+
+    if (!auth.authenticated) {
+      response.status(401).json({ error: 'Please sign in to continue.' })
+      return
+    }
+
+    next()
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.get('/api/dashboard', async (request, response, next) => {

@@ -27,10 +27,90 @@ import {
   toIsoString,
 } from './shared.js'
 
+const SESSION_COOKIE_NAME = 'pressure_salt_session'
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+
+function parseCookies(headerValue = '') {
+  return Object.fromEntries(
+    String(headerValue)
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const [name, ...rest] = part.split('=')
+        return [name, decodeURIComponent(rest.join('='))]
+      })
+  )
+}
+
 async function hashPrivacyPin(pin) {
   const encoded = new TextEncoder().encode(pin)
   const digest = await crypto.subtle.digest('SHA-256', encoded)
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+function createRandomToken() {
+  const values = new Uint8Array(32)
+  crypto.getRandomValues(values)
+  return [...values].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+async function hashSessionToken(token) {
+  const encoded = new TextEncoder().encode(token)
+  const digest = await crypto.subtle.digest('SHA-256', encoded)
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+function createSessionCookie(request, token) {
+  const isSecure = new URL(request.url).protocol === 'https:'
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}${isSecure ? '; Secure' : ''}`
+}
+
+function clearSessionCookie(request) {
+  const isSecure = new URL(request.url).protocol === 'https:'
+  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${isSecure ? '; Secure' : ''}`
+}
+
+async function hashPassword(password, salt) {
+  const encoder = new TextEncoder()
+  const baseKey = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: encoder.encode(salt),
+      iterations: 120000,
+      hash: 'SHA-256',
+    },
+    baseKey,
+    256
+  )
+
+  return [...new Uint8Array(derivedBits)].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+function getSessionExpiryIso() {
+  return new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000).toISOString()
+}
+
+async function getAuthStatus(store, request) {
+  const authState = await store.getAuthState()
+  const cookies = parseCookies(request.headers.get('cookie') ?? '')
+  const sessionToken = cookies[SESSION_COOKIE_NAME] ?? ''
+  const sessionHash = sessionToken ? await hashSessionToken(sessionToken) : ''
+  const hasAccount = Boolean(authState.passwordHash)
+  const authenticated =
+    hasAccount &&
+    Boolean(sessionHash) &&
+    authState.sessionHash === sessionHash &&
+    Boolean(authState.sessionExpiresAt) &&
+    new Date(authState.sessionExpiresAt).getTime() > Date.now()
+
+  return {
+    hasAccount,
+    authenticated,
+    username: authenticated ? authState.username : authState.username ?? '',
+    authState,
+  }
 }
 
 function getTelegramConfig(env) {
@@ -158,6 +238,93 @@ async function handleApiRequest(request, env) {
       ok: true,
       storageMode: env.DB ? 'd1' : 'unconfigured',
     })
+  }
+
+  if (pathname === '/api/auth/status' && method === 'GET') {
+    const auth = await getAuthStatus(store, request)
+    return jsonResponse({
+      hasAccount: auth.hasAccount,
+      authenticated: auth.authenticated,
+      username: auth.authenticated ? auth.username : '',
+    })
+  }
+
+  if (pathname === '/api/auth/register' && method === 'POST') {
+    const body = await readJson(request)
+    const username = String(body?.username ?? '').trim()
+    const password = String(body?.password ?? '')
+    const auth = await getAuthStatus(store, request)
+
+    if (auth.hasAccount) {
+      return errorResponse('An account already exists for this app.', 400)
+    }
+
+    if (username.length < 3 || username.length > 80) {
+      return errorResponse('Username must be between 3 and 80 characters.', 400)
+    }
+
+    if (password.length < 6 || password.length > 128) {
+      return errorResponse('Password must be between 6 and 128 characters.', 400)
+    }
+
+    const salt = crypto.randomUUID()
+    const passwordHash = await hashPassword(password, salt)
+    const sessionToken = createRandomToken()
+    const sessionHash = await hashSessionToken(sessionToken)
+    const sessionExpiresAt = getSessionExpiryIso()
+
+    await store.createAuthAccount({
+      username,
+      passwordHash,
+      passwordSalt: salt,
+      sessionHash,
+      sessionExpiresAt,
+    })
+
+    const response = jsonResponse({ hasAccount: true, authenticated: true, username }, 201)
+    response.headers.set('Set-Cookie', createSessionCookie(request, sessionToken))
+    return response
+  }
+
+  if (pathname === '/api/auth/login' && method === 'POST') {
+    const body = await readJson(request)
+    const username = String(body?.username ?? '').trim()
+    const password = String(body?.password ?? '')
+    const auth = await getAuthStatus(store, request)
+
+    if (!auth.hasAccount) {
+      return errorResponse('Create your account first.', 400)
+    }
+
+    const usernameMatches = auth.authState.username === username
+    const passwordHash = await hashPassword(password, auth.authState.passwordSalt)
+
+    if (!usernameMatches || passwordHash !== auth.authState.passwordHash) {
+      return errorResponse('The username or password did not match.', 401)
+    }
+
+    const sessionToken = createRandomToken()
+    const sessionHash = await hashSessionToken(sessionToken)
+    const sessionExpiresAt = getSessionExpiryIso()
+
+    await store.saveAuthSession({ sessionHash, sessionExpiresAt })
+
+    const response = jsonResponse({ hasAccount: true, authenticated: true, username })
+    response.headers.set('Set-Cookie', createSessionCookie(request, sessionToken))
+    return response
+  }
+
+  if (pathname === '/api/auth/logout' && method === 'POST') {
+    await store.clearAuthSession()
+    const response = jsonResponse({ ok: true })
+    response.headers.set('Set-Cookie', clearSessionCookie(request))
+    return response
+  }
+
+  const auth = await getAuthStatus(store, request)
+
+  if (!auth.authenticated) {
+    return errorResponse('Please sign in to continue.', 401)
   }
 
   if (pathname === '/api/dashboard' && method === 'GET') {

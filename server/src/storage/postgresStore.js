@@ -94,6 +94,17 @@ class PostgresStore {
         CONSTRAINT single_fitbit_row CHECK (id = 1)
       );
 
+      CREATE TABLE IF NOT EXISTS auth_account (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        username TEXT NOT NULL DEFAULT '',
+        password_hash TEXT NOT NULL DEFAULT '',
+        password_salt TEXT NOT NULL DEFAULT '',
+        session_hash TEXT NOT NULL DEFAULT '',
+        session_expires_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT single_auth_row CHECK (id = 1)
+      );
+
       CREATE TABLE IF NOT EXISTS goal_badges (
         date_key DATE PRIMARY KEY,
         steps INTEGER NOT NULL,
@@ -139,6 +150,10 @@ class PostgresStore {
       INSERT INTO app_settings (id, sodium_goal_mg)
       VALUES (1, 2300)
       ON CONFLICT (id) DO NOTHING;
+
+      INSERT INTO auth_account (id, username, password_hash, password_salt, session_hash, session_expires_at)
+      VALUES (1, '', '', '', '', NULL)
+      ON CONFLICT (id) DO NOTHING;
     `)
   }
 
@@ -152,6 +167,76 @@ class PostgresStore {
   async getPrivacyPinHash() {
     const result = await this.pool.query('SELECT privacy_pin_hash FROM app_settings WHERE id = 1')
     return result.rows[0]?.privacy_pin_hash ?? ''
+  }
+
+  async getAuthState() {
+    const result = await this.pool.query(
+      `
+        SELECT
+          username,
+          password_hash AS "passwordHash",
+          password_salt AS "passwordSalt",
+          session_hash AS "sessionHash",
+          session_expires_at AS "sessionExpiresAt"
+        FROM auth_account
+        WHERE id = 1
+      `
+    )
+
+    return (
+      result.rows[0] ?? {
+        username: '',
+        passwordHash: '',
+        passwordSalt: '',
+        sessionHash: '',
+        sessionExpiresAt: '',
+      }
+    )
+  }
+
+  async createAuthAccount(entry) {
+    await this.pool.query(
+      `
+        INSERT INTO auth_account (id, username, password_hash, password_salt, session_hash, session_expires_at, updated_at)
+        VALUES (1, $1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (id)
+        DO UPDATE SET
+          username = EXCLUDED.username,
+          password_hash = EXCLUDED.password_hash,
+          password_salt = EXCLUDED.password_salt,
+          session_hash = EXCLUDED.session_hash,
+          session_expires_at = EXCLUDED.session_expires_at,
+          updated_at = NOW()
+      `,
+      [entry.username, entry.passwordHash, entry.passwordSalt, entry.sessionHash ?? '', entry.sessionExpiresAt ?? null]
+    )
+
+    return this.getAuthState()
+  }
+
+  async saveAuthSession(entry) {
+    await this.pool.query(
+      `
+        UPDATE auth_account
+        SET session_hash = $1, session_expires_at = $2, updated_at = NOW()
+        WHERE id = 1
+      `,
+      [entry.sessionHash ?? '', entry.sessionExpiresAt ?? null]
+    )
+
+    return this.getAuthState()
+  }
+
+  async clearAuthSession() {
+    await this.pool.query(
+      `
+        UPDATE auth_account
+        SET session_hash = '', session_expires_at = NULL, updated_at = NOW()
+        WHERE id = 1
+      `
+    )
+
+    return this.getAuthState()
   }
 
   async getDashboard() {

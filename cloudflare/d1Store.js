@@ -78,6 +78,35 @@ export class D1Store {
 
     await this.db.prepare(
       `
+        CREATE TABLE IF NOT EXISTS auth_account (
+          id INTEGER PRIMARY KEY,
+          username TEXT NOT NULL DEFAULT '',
+          password_hash TEXT NOT NULL DEFAULT '',
+          password_salt TEXT NOT NULL DEFAULT '',
+          session_hash TEXT NOT NULL DEFAULT '',
+          session_expires_at TEXT,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `
+    ).run()
+
+    await this.db.prepare(
+      `
+        INSERT OR IGNORE INTO auth_account (
+          id,
+          username,
+          password_hash,
+          password_salt,
+          session_hash,
+          session_expires_at,
+          updated_at
+        )
+        VALUES (1, '', '', '', '', NULL, CURRENT_TIMESTAMP)
+      `
+    ).run()
+
+    await this.db.prepare(
+      `
         CREATE TABLE IF NOT EXISTS goal_badges (
           date_key TEXT PRIMARY KEY,
           steps INTEGER NOT NULL,
@@ -183,6 +212,92 @@ export class D1Store {
       .first()
 
     return row?.privacyPinHash ?? ''
+  }
+
+  async getAuthState() {
+    await this.ensureSetup()
+    const row = await this.db
+      .prepare(
+        `
+          SELECT
+            username,
+            password_hash AS passwordHash,
+            password_salt AS passwordSalt,
+            session_hash AS sessionHash,
+            session_expires_at AS sessionExpiresAt
+          FROM auth_account
+          WHERE id = 1
+        `
+      )
+      .first()
+
+    return {
+      username: row?.username ?? '',
+      passwordHash: row?.passwordHash ?? '',
+      passwordSalt: row?.passwordSalt ?? '',
+      sessionHash: row?.sessionHash ?? '',
+      sessionExpiresAt: row?.sessionExpiresAt ?? '',
+    }
+  }
+
+  async createAuthAccount(entry) {
+    await this.ensureSetup()
+    await this.db
+      .prepare(
+        `
+          INSERT INTO auth_account (id, username, password_hash, password_salt, session_hash, session_expires_at, updated_at)
+          VALUES (1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(id)
+          DO UPDATE SET
+            username = excluded.username,
+            password_hash = excluded.password_hash,
+            password_salt = excluded.password_salt,
+            session_hash = excluded.session_hash,
+            session_expires_at = excluded.session_expires_at,
+            updated_at = CURRENT_TIMESTAMP
+        `
+      )
+      .bind(
+        entry.username,
+        entry.passwordHash,
+        entry.passwordSalt,
+        entry.sessionHash ?? '',
+        entry.sessionExpiresAt ?? null
+      )
+      .run()
+
+    return this.getAuthState()
+  }
+
+  async saveAuthSession(entry) {
+    await this.ensureSetup()
+    await this.db
+      .prepare(
+        `
+          UPDATE auth_account
+          SET session_hash = ?, session_expires_at = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = 1
+        `
+      )
+      .bind(entry.sessionHash ?? '', entry.sessionExpiresAt ?? null)
+      .run()
+
+    return this.getAuthState()
+  }
+
+  async clearAuthSession() {
+    await this.ensureSetup()
+    await this.db
+      .prepare(
+        `
+          UPDATE auth_account
+          SET session_hash = '', session_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE id = 1
+        `
+      )
+      .run()
+
+    return this.getAuthState()
   }
 
   async updateSettings(nextSettings) {

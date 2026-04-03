@@ -78,6 +78,15 @@ class JsonStore {
     if (!parsed.favoriteFoods) {
       parsed.favoriteFoods = []
     }
+    if (!parsed.auth) {
+      parsed.auth = {
+        username: '',
+        passwordHash: '',
+        passwordSalt: '',
+        sessionHash: '',
+        sessionExpiresAt: '',
+      }
+    }
     if (!parsed.settings) {
       parsed.settings = { sodiumGoalMg: 2300, privacyPinHash: '' }
     }
@@ -259,6 +268,52 @@ class JsonStore {
     }
     await this.writeData(data)
     return this.getPrivacyStatus()
+  }
+
+  async getAuthState() {
+    const data = await this.readData()
+    return {
+      username: data.auth?.username ?? '',
+      passwordHash: data.auth?.passwordHash ?? '',
+      passwordSalt: data.auth?.passwordSalt ?? '',
+      sessionHash: data.auth?.sessionHash ?? '',
+      sessionExpiresAt: data.auth?.sessionExpiresAt ?? '',
+    }
+  }
+
+  async createAuthAccount(entry) {
+    const data = await this.readData()
+    data.auth = {
+      username: entry.username,
+      passwordHash: entry.passwordHash,
+      passwordSalt: entry.passwordSalt,
+      sessionHash: entry.sessionHash ?? '',
+      sessionExpiresAt: entry.sessionExpiresAt ?? '',
+    }
+    await this.writeData(data)
+    return this.getAuthState()
+  }
+
+  async saveAuthSession(entry) {
+    const data = await this.readData()
+    data.auth = {
+      ...(data.auth ?? {}),
+      sessionHash: entry.sessionHash ?? '',
+      sessionExpiresAt: entry.sessionExpiresAt ?? '',
+    }
+    await this.writeData(data)
+    return this.getAuthState()
+  }
+
+  async clearAuthSession() {
+    const data = await this.readData()
+    data.auth = {
+      ...(data.auth ?? {}),
+      sessionHash: '',
+      sessionExpiresAt: '',
+    }
+    await this.writeData(data)
+    return this.getAuthState()
   }
 
   async getFitbitState() {

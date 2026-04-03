@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pressure-salt-cache-v6'
+const CACHE_NAME = 'pressure-salt-cache-v7'
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',

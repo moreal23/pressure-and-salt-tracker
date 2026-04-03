@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS fitbit_connection (
   CONSTRAINT single_fitbit_row CHECK (id = 1)
 );
 
+CREATE TABLE IF NOT EXISTS auth_account (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  username TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL DEFAULT '',
+  password_salt TEXT NOT NULL DEFAULT '',
+  session_hash TEXT NOT NULL DEFAULT '',
+  session_expires_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT single_auth_row CHECK (id = 1)
+);
+
 CREATE TABLE IF NOT EXISTS goal_badges (
   date_key DATE PRIMARY KEY,
   steps INTEGER NOT NULL,

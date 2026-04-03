@@ -53,6 +53,7 @@ const importExample = `date,time,systolic,diastolic,pulse,notes
 04/04/2026,7:40 AM,128,82,71,Before breakfast`
 const CELEBRATION_STEPS_GOAL = 15000
 const REMINDER_CHECK_INTERVAL_MS = 30_000
+const AUTO_LOCK_AFTER_MS = 5_000
 const PRIVACY_UNLOCK_KEY = 'pressure-salt-unlocked'
 
 function formatImportDate(date) {
@@ -456,6 +457,7 @@ function getLocalDateTimeValue() {
 
 async function fetchJson(path, options) {
   const response = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(options?.headers ?? {}),
@@ -469,6 +471,97 @@ async function fetchJson(path, options) {
   }
 
   return body
+}
+
+function AuthScreen({
+  mode,
+  authState,
+  setAuthState,
+  onSubmit,
+}) {
+  const [showPassword, setShowPassword] = useState(false)
+  const isRegister = mode === 'register'
+
+  return (
+    <main className="app-shell loading-shell">
+      <div className="loading-card privacy-lock-card">
+        <p className="eyebrow">{isRegister ? 'Create Account' : 'Sign In'}</p>
+        <h1>{isRegister ? 'Set up your private account' : 'Sign in to your health tracker'}</h1>
+        <p>
+          {isRegister
+            ? 'Create one account for this website. Your password must be at least 6 characters.'
+            : 'Use the account you created for this website to open your dashboard.'}
+        </p>
+
+        <form className="simple-form" onSubmit={onSubmit}>
+          <label htmlFor="authUsername">Username</label>
+          <input
+            id="authUsername"
+            type="text"
+            value={authState.usernameInput}
+            onChange={(event) =>
+              setAuthState((current) => ({
+                ...current,
+                usernameInput: event.target.value,
+                error: '',
+              }))
+            }
+            required
+          />
+
+          <label htmlFor="authPassword">Password</label>
+          <div className="password-field">
+            <input
+              id="authPassword"
+              type={showPassword ? 'text' : 'password'}
+              value={authState.passwordInput}
+              onChange={(event) =>
+                setAuthState((current) => ({
+                  ...current,
+                  passwordInput: event.target.value,
+                  error: '',
+                }))
+              }
+              minLength={6}
+              required
+            />
+            <button className="button button--ghost password-toggle" type="button" onClick={() => setShowPassword((current) => !current)}>
+              {showPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
+
+          <button className="button button--solid" type="submit" disabled={authState.busy}>
+            {authState.busy ? (isRegister ? 'Creating account...' : 'Signing in...') : isRegister ? 'Create account' : 'Sign in'}
+          </button>
+        </form>
+
+        {authState.error ? <p className="status status--error">{authState.error}</p> : null}
+      </div>
+    </main>
+  )
+}
+
+function AccountPanel({ username, onLogout, busy }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+        <p className="eyebrow">Account</p>
+        <h2>Signed in</h2>
+      </div>
+      <p className="panel-copy">This website now uses a real account login and signs out automatically after 5 seconds without activity.</p>
+    </div>
+
+      <div className="privacy-banner">
+        <strong>{username}</strong>
+        <span>Your account is active on this device.</span>
+      </div>
+
+      <button className="button button--ghost" type="button" onClick={onLogout} disabled={busy}>
+        {busy ? 'Signing out...' : 'Sign out'}
+      </button>
+    </section>
+  )
 }
 
 async function decodeBarcodeFromPhoto(file, scannerNodeRef, scannerInstanceRef) {
@@ -1991,6 +2084,16 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
 
 function App() {
   const [dashboard, setDashboard] = useState(null)
+  const [authState, setAuthState] = useState({
+    checking: true,
+    hasAccount: false,
+    authenticated: false,
+    username: '',
+    usernameInput: '',
+    passwordInput: '',
+    busy: false,
+    error: '',
+  })
   const [history, setHistory] = useState({
     bloodPressureLogs: [],
     foodLogs: [],
@@ -2118,6 +2221,15 @@ function App() {
         })
       }
     } catch (error) {
+      if (/sign in to continue/i.test(error.message)) {
+        setAuthState((current) => ({
+          ...current,
+          authenticated: false,
+          busy: false,
+          passwordInput: '',
+          error: '',
+        }))
+      }
       setStatus({ loading: false, error: error.message })
     }
   }
@@ -2127,30 +2239,30 @@ function App() {
       setStatus({ loading: true, error: '' })
 
       try {
-        const privacyStatus = await fetchJson('/api/privacy/status')
-        const sessionUnlocked = window.sessionStorage.getItem(PRIVACY_UNLOCK_KEY) === 'true'
-        const unlocked = !privacyStatus.pinEnabled || sessionUnlocked
-
-        setPrivacyState((current) => ({
+        const auth = await fetchJson('/api/auth/status')
+        setAuthState((current) => ({
           ...current,
           checking: false,
-          pinEnabled: privacyStatus.pinEnabled,
-          unlocked,
+          hasAccount: auth.hasAccount,
+          authenticated: auth.authenticated,
+          username: auth.username ?? '',
+          usernameInput: auth.username ?? current.usernameInput,
+          passwordInput: '',
           error: '',
+          busy: false,
         }))
 
-        if (unlocked) {
+        if (auth.authenticated) {
           await loadDashboard({ silent: true })
         } else {
           setStatus({ loading: false, error: '' })
         }
       } catch (error) {
-        setPrivacyState((current) => ({
+        setAuthState((current) => ({
           ...current,
           checking: false,
-          pinEnabled: false,
-          unlocked: true,
-          error: '',
+          error: error.message,
+          busy: false,
         }))
         setStatus({ loading: false, error: error.message })
       }
@@ -2344,6 +2456,141 @@ function App() {
 
     setInstallPrompt(null)
   }
+
+  async function handleRegister(event) {
+    event.preventDefault()
+    setAuthState((current) => ({
+      ...current,
+      busy: true,
+      error: '',
+    }))
+
+    try {
+      const result = await fetchJson('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: authState.usernameInput,
+          password: authState.passwordInput,
+        }),
+      })
+
+      setAuthState((current) => ({
+        ...current,
+        hasAccount: result.hasAccount,
+        authenticated: result.authenticated,
+        username: result.username,
+        usernameInput: result.username,
+        passwordInput: '',
+        busy: false,
+        error: '',
+      }))
+      await loadDashboard({ silent: true })
+    } catch (error) {
+      setAuthState((current) => ({
+        ...current,
+        busy: false,
+        error: error.message,
+      }))
+    }
+  }
+
+  async function handleLogin(event) {
+    event.preventDefault()
+    setAuthState((current) => ({
+      ...current,
+      busy: true,
+      error: '',
+    }))
+
+    try {
+      const result = await fetchJson('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: authState.usernameInput,
+          password: authState.passwordInput,
+        }),
+      })
+
+      setAuthState((current) => ({
+        ...current,
+        hasAccount: result.hasAccount,
+        authenticated: result.authenticated,
+        username: result.username,
+        usernameInput: result.username,
+        passwordInput: '',
+        busy: false,
+        error: '',
+      }))
+      await loadDashboard({ silent: true })
+    } catch (error) {
+      setAuthState((current) => ({
+        ...current,
+        busy: false,
+        error: error.message,
+      }))
+      setStatus({ loading: false, error: '' })
+    }
+  }
+
+  async function handleLogout() {
+    setAuthState((current) => ({
+      ...current,
+      busy: true,
+      error: '',
+    }))
+
+    try {
+      await fetchJson('/api/auth/logout', {
+        method: 'POST',
+      })
+      setAuthState((current) => ({
+        ...current,
+        authenticated: false,
+        passwordInput: '',
+        busy: false,
+        error: '',
+      }))
+      setStatus({ loading: false, error: '' })
+      setDashboard(null)
+      setHistory({ bloodPressureLogs: [], foodLogs: [] })
+      setMedicationLogs([])
+      setReminders([])
+      setFavoriteFoods([])
+    } catch (error) {
+      setAuthState((current) => ({
+        ...current,
+        busy: false,
+        error: error.message,
+      }))
+    }
+  }
+
+  useEffect(() => {
+    if (!authState.authenticated) {
+      return
+    }
+
+    let timeoutId = null
+
+    const resetTimer = () => {
+      window.clearTimeout(timeoutId)
+      timeoutId = window.setTimeout(() => {
+        handleLogout().then(() => {
+          setSavingState('The website locked after 5 seconds of inactivity.')
+        }).catch(() => null)
+      }, AUTO_LOCK_AFTER_MS)
+    }
+
+    const events = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart']
+
+    resetTimer()
+    events.forEach((eventName) => window.addEventListener(eventName, resetTimer, { passive: true }))
+
+    return () => {
+      window.clearTimeout(timeoutId)
+      events.forEach((eventName) => window.removeEventListener(eventName, resetTimer))
+    }
+  }, [authState.authenticated])
 
   async function handleFitbitConnect() {
     setFitbitBusy(true)
@@ -3167,7 +3414,7 @@ function App() {
     }
   }
 
-  if (privacyState.checking || (privacyState.unlocked && status.loading)) {
+  if (authState.checking || (authState.authenticated && status.loading)) {
     return (
       <main className="app-shell loading-shell">
         <div className="loading-card">
@@ -3179,20 +3426,13 @@ function App() {
     )
   }
 
-  if (!privacyState.unlocked) {
+  if (!authState.authenticated) {
     return (
-      <PrivacyLockScreen
-        unlockPin={privacyState.unlockPin}
-        setUnlockPin={(value) =>
-          setPrivacyState((current) => ({
-            ...current,
-            unlockPin: value,
-            error: '',
-          }))
-        }
-        onUnlock={handlePrivacyUnlock}
-        busy={privacyState.busy === 'unlock'}
-        error={privacyState.error}
+      <AuthScreen
+        mode={authState.hasAccount ? 'login' : 'register'}
+        authState={authState}
+        setAuthState={setAuthState}
+        onSubmit={authState.hasAccount ? handleLogin : handleRegister}
       />
     )
   }
@@ -3367,13 +3607,7 @@ function App() {
             </form>
           </section>
 
-          <PrivacyPanel
-            privacyState={privacyState}
-            setPrivacyState={setPrivacyState}
-            onSavePin={handlePrivacySave}
-            onClearPin={handlePrivacyClear}
-            onLockNow={handlePrivacyLockNow}
-          />
+          <AccountPanel username={authState.username} onLogout={handleLogout} busy={authState.busy} />
 
           <FitbitPanel
             fitbit={fitbit}

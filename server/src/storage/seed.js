@@ -17,6 +17,13 @@ function createSeedData() {
       sodiumGoalMg: 2300,
       privacyPinHash: '',
     },
+    auth: {
+      username: '',
+      passwordHash: '',
+      passwordSalt: '',
+      sessionHash: '',
+      sessionExpiresAt: '',
+    },
     bloodPressureLogs: [
       {
         id: 'bp-1',
