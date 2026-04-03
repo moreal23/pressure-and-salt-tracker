@@ -1140,6 +1140,13 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
   const [scannerReady, setScannerReady] = useState(false)
   const [fileScanBusy, setFileScanBusy] = useState(false)
   const [showCameraHelp, setShowCameraHelp] = useState(false)
+  const [preferDirectCameraCapture, setPreferDirectCameraCapture] = useState(false)
+
+  useEffect(() => {
+    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches
+    const isPhoneLikeDevice = /android|iphone|ipad|ipod/i.test(window.navigator.userAgent)
+    setPreferDirectCameraCapture(isTouchDevice || isPhoneLikeDevice)
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -1317,6 +1324,11 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
   }
 
   function handlePrimaryScanAction() {
+    if (preferDirectCameraCapture) {
+      fileInputRef.current?.click()
+      return
+    }
+
     startScanner()
   }
 
@@ -1328,22 +1340,35 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
           <h2>Scan packaged food with your camera</h2>
         </div>
         <p className="panel-copy">
-          Open the live scanner to read a packaged food barcode right away. If live scanning does not work on your phone, you can still use the photo option below.
+          {preferDirectCameraCapture
+            ? 'On your phone, the main button opens the camera directly. After you take the picture, the app automatically reads the barcode and loads the food info.'
+            : 'Open the live scanner to read a packaged food barcode right away. If live scanning does not work, you can still use the photo option below.'}
         </p>
       </div>
 
       <div className="scanner-actions">
         <button className="button button--solid" type="button" onClick={handlePrimaryScanAction}>
-          Start live barcode scan
+          {preferDirectCameraCapture ? 'Scan barcode with camera' : 'Start live barcode scan'}
         </button>
-        <button
-          className="button button--ghost"
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={fileScanBusy}
-        >
-          {fileScanBusy ? 'Reading photo...' : 'Take barcode photo'}
-        </button>
+        {preferDirectCameraCapture ? (
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={startScanner}
+            disabled={scannerReady}
+          >
+            Open live scanner instead
+          </button>
+        ) : (
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={fileScanBusy}
+          >
+            {fileScanBusy ? 'Reading photo...' : 'Take barcode photo'}
+          </button>
+        )}
         <button
           className="button button--ghost"
           type="button"
