@@ -1282,6 +1282,7 @@ function App() {
   const playedBadgeDatesRef = useRef(new Set())
   const fitbitSyncInFlightRef = useRef(false)
   const lastAutoSyncAttemptRef = useRef(0)
+  const fitbitSessionAutoSyncRef = useRef(false)
   const triggeredRemindersRef = useRef(new Set())
 
   const foodAssessment = useMemo(() => {
@@ -1561,6 +1562,7 @@ function App() {
       await fetchJson('/api/fitbit/disconnect', {
         method: 'POST',
       })
+      fitbitSessionAutoSyncRef.current = false
       setFitbit((current) => ({
         ...current,
         connected: false,
@@ -1577,7 +1579,14 @@ function App() {
 
   useEffect(() => {
     if (!fitbit.connected || !fitbit.configured) {
+      fitbitSessionAutoSyncRef.current = false
       return
+    }
+
+    if (!fitbitSessionAutoSyncRef.current) {
+      fitbitSessionAutoSyncRef.current = true
+      lastAutoSyncAttemptRef.current = Date.now()
+      syncFitbitData({ silent: true }).catch(() => null)
     }
 
     const syncIfNeeded = () => {
