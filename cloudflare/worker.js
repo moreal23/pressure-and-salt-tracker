@@ -25,6 +25,119 @@ import {
   toIsoString,
 } from './shared.js'
 
+function getTelegramConfig(env) {
+  return {
+    botToken: env.TELEGRAM_BOT_TOKEN ?? '',
+    chatId: env.TELEGRAM_CHAT_ID ?? '',
+    reminderTimezone: env.REMINDER_TIMEZONE ?? 'America/New_York',
+  }
+}
+
+function isTelegramConfigured(telegramConfig) {
+  return Boolean(telegramConfig.botToken && telegramConfig.chatId)
+}
+
+function getReminderDateParts(timeZone) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+  const parts = formatter.formatToParts(new Date())
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
+
+  return {
+    dayKey: `${values.year}-${values.month}-${values.day}`,
+    timeOfDay: `${values.hour}:${values.minute}`,
+  }
+}
+
+function buildTelegramReminderMessage(reminder, schedule) {
+  const detailLines = [
+    `Reminder: ${reminder.title}`,
+    `Time: ${reminder.timeOfDay} (${schedule.reminderTimezone})`,
+  ]
+
+  if (reminder.medicationName) {
+    detailLines.push(`Medication: ${reminder.medicationName}`)
+  }
+
+  if (reminder.dosage) {
+    detailLines.push(`Dosage: ${reminder.dosage}`)
+  }
+
+  if (reminder.notes) {
+    detailLines.push(`Notes: ${reminder.notes}`)
+  }
+
+  return detailLines.join('\n')
+}
+
+async function sendTelegramMessage(telegramConfig, text) {
+  const response = await fetch(`https://api.telegram.org/bot${telegramConfig.botToken}/sendMessage`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      chat_id: telegramConfig.chatId,
+      text,
+    }),
+  })
+
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.description ?? 'Telegram message failed.')
+  }
+
+  return payload
+}
+
+async function sendDueReminderMessages(env) {
+  const store = new D1Store(env)
+  const telegramConfig = getTelegramConfig(env)
+
+  if (!isTelegramConfigured(telegramConfig)) {
+    return { sentCount: 0, reason: 'telegram-not-configured' }
+  }
+
+  const schedule = {
+    reminderTimezone: telegramConfig.reminderTimezone,
+    ...getReminderDateParts(telegramConfig.reminderTimezone),
+  }
+  const reminders = await store.getReminders()
+  let sentCount = 0
+
+  for (const reminder of reminders) {
+    if (!reminder.enabled || reminder.timeOfDay !== schedule.timeOfDay) {
+      continue
+    }
+
+    const alreadySent = await store.hasReminderDelivery(reminder.id, schedule.dayKey, 'telegram')
+
+    if (alreadySent) {
+      continue
+    }
+
+    await sendTelegramMessage(telegramConfig, buildTelegramReminderMessage(reminder, schedule))
+    await store.recordReminderDelivery({
+      id: crypto.randomUUID(),
+      reminderId: reminder.id,
+      dayKey: schedule.dayKey,
+      channel: 'telegram',
+      sentAt: new Date().toISOString(),
+    })
+    sentCount += 1
+  }
+
+  return { sentCount, reason: 'ok' }
+}
+
 async function handleApiRequest(request, env) {
   const url = new URL(request.url)
   const pathname = url.pathname
@@ -105,6 +218,31 @@ async function handleApiRequest(request, env) {
     }
 
     return jsonResponse({ ok: true })
+  }
+
+  if (pathname === '/api/telegram/status' && method === 'GET') {
+    const telegramConfig = getTelegramConfig(env)
+
+    return jsonResponse({
+      configured: isTelegramConfigured(telegramConfig),
+      chatId: telegramConfig.chatId,
+      reminderTimezone: telegramConfig.reminderTimezone,
+    })
+  }
+
+  if (pathname === '/api/telegram/test' && method === 'POST') {
+    const telegramConfig = getTelegramConfig(env)
+
+    if (!isTelegramConfigured(telegramConfig)) {
+      return errorResponse('Telegram is not configured yet.', 400)
+    }
+
+    await sendTelegramMessage(
+      telegramConfig,
+      `PressureSalt test message\nTime: ${new Date().toLocaleString('en-US', { timeZone: telegramConfig.reminderTimezone })}`
+    )
+
+    return jsonResponse({ ok: true }, 201)
   }
 
   if (pathname === '/api/backup' && method === 'GET') {
@@ -356,5 +494,8 @@ export default {
 
       return new Response('Unexpected server error.', { status: 500 })
     }
+  },
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(sendDueReminderMessages(env))
   },
 }

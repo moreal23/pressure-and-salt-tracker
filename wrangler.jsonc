@@ -3,6 +3,9 @@
   "name": "pressure-and-salt-tracker",
   "main": "./cloudflare/worker.js",
   "compatibility_date": "2026-04-03",
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "assets": {
     "directory": "./client/dist",
     "binding": "ASSETS",
@@ -10,7 +13,8 @@
     "run_worker_first": ["/api/*"]
   },
   "vars": {
-    "FITBIT_SCOPES": "activity heartrate profile sleep weight"
+    "FITBIT_SCOPES": "activity heartrate profile sleep weight",
+    "REMINDER_TIMEZONE": "America/New_York"
   },
   "d1_databases": [
     {

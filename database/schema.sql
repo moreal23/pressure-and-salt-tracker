@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS reminders (
   notes TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS reminder_deliveries (
+  id UUID PRIMARY KEY,
+  reminder_id TEXT NOT NULL,
+  day_key DATE NOT NULL,
+  channel TEXT NOT NULL,
+  sent_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (reminder_id, day_key, channel)
+);
+
 INSERT INTO app_settings (id, sodium_goal_mg)
 VALUES (1, 2300)
 ON CONFLICT (id) DO NOTHING;

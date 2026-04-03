@@ -72,6 +72,9 @@ class JsonStore {
     if (!parsed.reminders) {
       parsed.reminders = []
     }
+    if (!parsed.reminderDeliveries) {
+      parsed.reminderDeliveries = []
+    }
     parsed.reminders = parsed.reminders.map((entry) => ({
       dosage: '',
       ...entry,
@@ -274,6 +277,30 @@ class JsonStore {
     data.reminders = nextReminders
     await this.writeData(data)
     return true
+  }
+
+  async hasReminderDelivery(reminderId, dayKey, channel) {
+    const data = await this.readData()
+    return data.reminderDeliveries.some(
+      (entry) => entry.reminderId === reminderId && entry.dayKey === dayKey && entry.channel === channel
+    )
+  }
+
+  async recordReminderDelivery(entry) {
+    const data = await this.readData()
+    const exists = data.reminderDeliveries.some(
+      (item) => item.reminderId === entry.reminderId && item.dayKey === entry.dayKey && item.channel === entry.channel
+    )
+
+    if (!exists) {
+      data.reminderDeliveries.push({
+        id: randomUUID(),
+        ...entry,
+      })
+      await this.writeData(data)
+    }
+
+    return entry
   }
 
   async getBackupData() {

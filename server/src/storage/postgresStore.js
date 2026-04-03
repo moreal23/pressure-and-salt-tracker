@@ -112,6 +112,15 @@ class PostgresStore {
       ALTER TABLE reminders
       ADD COLUMN IF NOT EXISTS dosage TEXT NOT NULL DEFAULT '';
 
+      CREATE TABLE IF NOT EXISTS reminder_deliveries (
+        id UUID PRIMARY KEY,
+        reminder_id TEXT NOT NULL,
+        day_key DATE NOT NULL,
+        channel TEXT NOT NULL,
+        sent_at TIMESTAMPTZ NOT NULL,
+        UNIQUE(reminder_id, day_key, channel)
+      );
+
       INSERT INTO app_settings (id, sodium_goal_mg)
       VALUES (1, 2300)
       ON CONFLICT (id) DO NOTHING;
@@ -394,6 +403,33 @@ class PostgresStore {
   async deleteReminder(id) {
     const result = await this.pool.query('DELETE FROM reminders WHERE id = $1', [id])
     return result.rowCount > 0
+  }
+
+  async hasReminderDelivery(reminderId, dayKey, channel) {
+    const result = await this.pool.query(
+      `
+        SELECT id
+        FROM reminder_deliveries
+        WHERE reminder_id = $1 AND day_key = $2 AND channel = $3
+        LIMIT 1
+      `,
+      [reminderId, dayKey, channel]
+    )
+
+    return result.rowCount > 0
+  }
+
+  async recordReminderDelivery(entry) {
+    await this.pool.query(
+      `
+        INSERT INTO reminder_deliveries (id, reminder_id, day_key, channel, sent_at)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (reminder_id, day_key, channel) DO NOTHING
+      `,
+      [entry.id, entry.reminderId, entry.dayKey, entry.channel, entry.sentAt]
+    )
+
+    return entry
   }
 
   async getBackupData() {

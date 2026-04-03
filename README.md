@@ -20,6 +20,7 @@ This folder is a real local test app you can run with `npm run dev` before deplo
 - Can export a full backup file and restore the app from that backup later
 - Includes PWA files so it can be installed on supported phones after deployment
 - Includes a Fitbit OAuth integration panel for steps, heart rate, sleep, and weight
+- Can send Telegram reminder messages from the live Cloudflare deployment
 - Uses PostgreSQL when configured, with a local JSON data file fallback for quick testing
 - Includes a Cloudflare Workers + D1 deployment path for one public website URL
 
@@ -94,6 +95,7 @@ Once configured, the app can connect to Fitbit, auto-sync when the app opens, an
 - `Restore Backup` loads one of those JSON files back into the app
 - Fitbit backup exports keep your synced summary but do not include Fitbit access tokens
 - Reminder notifications appear while the app is open and browser notifications are allowed
+- The live Cloudflare deployment can also send reminder messages to Telegram using a bot token and chat id
 
 ## Cloudflare Workers Setup
 
@@ -104,6 +106,8 @@ Once configured, the app can connect to Fitbit, auto-sync when the app opens, an
 5. Copy the returned database id into `wrangler.jsonc`
 6. Apply the schema with `npm run cf:d1:migrate:remote`
 7. Deploy with `npm run cf:deploy`
+8. Set Cloudflare secrets for `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` if you want Telegram alerts
+9. Use `REMINDER_TIMEZONE` to match your local reminder time zone if needed
 
 For a local Cloudflare-style preview after setup:
 

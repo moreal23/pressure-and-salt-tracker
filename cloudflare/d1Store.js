@@ -93,6 +93,19 @@ export class D1Store {
         )
       `
     ).run()
+
+    await this.db.prepare(
+      `
+        CREATE TABLE IF NOT EXISTS reminder_deliveries (
+          id TEXT PRIMARY KEY,
+          reminder_id TEXT NOT NULL,
+          day_key TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          sent_at TEXT NOT NULL,
+          UNIQUE(reminder_id, day_key, channel)
+        )
+      `
+    ).run()
   }
 
   mapBloodPressureRow(row) {
@@ -452,6 +465,38 @@ export class D1Store {
     await this.ensureSetup()
     const result = await this.db.prepare('DELETE FROM reminders WHERE id = ?').bind(id).run()
     return Number(result.meta?.changes ?? 0) > 0
+  }
+
+  async hasReminderDelivery(reminderId, dayKey, channel) {
+    await this.ensureSetup()
+    const result = await this.db
+      .prepare(
+        `
+          SELECT id
+          FROM reminder_deliveries
+          WHERE reminder_id = ? AND day_key = ? AND channel = ?
+          LIMIT 1
+        `
+      )
+      .bind(reminderId, dayKey, channel)
+      .first()
+
+    return Boolean(result?.id)
+  }
+
+  async recordReminderDelivery(entry) {
+    await this.ensureSetup()
+    await this.db
+      .prepare(
+        `
+          INSERT OR IGNORE INTO reminder_deliveries (id, reminder_id, day_key, channel, sent_at)
+          VALUES (?, ?, ?, ?, ?)
+        `
+      )
+      .bind(entry.id, entry.reminderId, entry.dayKey, entry.channel, entry.sentAt)
+      .run()
+
+    return entry
   }
 
   async getBackupData() {
