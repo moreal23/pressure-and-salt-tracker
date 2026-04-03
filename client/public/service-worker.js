@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pressure-salt-cache-v3'
+const CACHE_NAME = 'pressure-salt-cache-v4'
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -23,6 +23,38 @@ self.addEventListener('activate', (event) => {
   self.clients.claim()
 })
 
+async function networkFirst(request, fallbackKey = request) {
+  try {
+    const networkResponse = await fetch(request)
+
+    if (networkResponse && networkResponse.status === 200) {
+      const responseClone = networkResponse.clone()
+      caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone))
+    }
+
+    return networkResponse
+  } catch {
+    return caches.match(fallbackKey)
+  }
+}
+
+async function cacheFirst(request) {
+  const cachedResponse = await caches.match(request)
+
+  if (cachedResponse) {
+    return cachedResponse
+  }
+
+  const networkResponse = await fetch(request)
+
+  if (networkResponse && networkResponse.status === 200) {
+    const responseClone = networkResponse.clone()
+    caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone))
+  }
+
+  return networkResponse
+}
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') {
     return
@@ -40,25 +72,21 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request).catch(() => caches.match('/')))
+    event.respondWith(networkFirst(event.request, '/'))
     return
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse
-      }
+  const isAppCodeRequest =
+    requestUrl.pathname.endsWith('.js') ||
+    requestUrl.pathname.endsWith('.css') ||
+    requestUrl.pathname.endsWith('.html') ||
+    requestUrl.pathname.endsWith('.webmanifest') ||
+    requestUrl.pathname === '/'
 
-      return fetch(event.request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200) {
-          return networkResponse
-        }
+  if (isAppCodeRequest) {
+    event.respondWith(networkFirst(event.request, event.request))
+    return
+  }
 
-        const responseClone = networkResponse.clone()
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone))
-        return networkResponse
-      })
-    })
-  )
+  event.respondWith(cacheFirst(event.request))
 })

@@ -5,9 +5,26 @@ import App from './App.jsx'
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').catch((error) => {
-      console.error('Service worker registration failed:', error)
+    let refreshing = false
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) {
+        return
+      }
+
+      refreshing = true
+      window.location.reload()
     })
+
+    navigator.serviceWorker
+      .register('/service-worker.js')
+      .then((registration) => {
+        registration.update().catch(() => null)
+        window.setInterval(() => registration.update().catch(() => null), 60_000)
+      })
+      .catch((error) => {
+        console.error('Service worker registration failed:', error)
+      })
   })
 }
 
