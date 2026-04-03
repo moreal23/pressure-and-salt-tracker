@@ -6,6 +6,7 @@ export function getFitbitConfig(env, request) {
     clientSecret: env.FITBIT_CLIENT_SECRET ?? '',
     redirectUri: env.FITBIT_REDIRECT_URI ?? `${origin}/api/fitbit/callback`,
     frontendUrl: env.FRONTEND_URL ?? origin,
+    timeZone: env.REMINDER_TIMEZONE ?? 'America/New_York',
     scopes: (env.FITBIT_SCOPES ?? 'activity heartrate profile sleep weight').split(/\s+/).filter(Boolean),
   }
 }
@@ -81,11 +82,44 @@ async function fetchFitbitJson(path, accessToken, options = {}) {
   return payload
 }
 
-async function fetchFitbitSummary(accessToken) {
-  const today = new Date().toISOString().slice(0, 10)
+function getDateForTimeZone(timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function mergeFitbitSummary(previousSummary, nextSummary) {
+  const nextHasSignal = Boolean(
+    nextSummary.profileName ||
+      nextSummary.stepsToday > 0 ||
+      nextSummary.restingHeartRate ||
+      nextSummary.latestHeartRate ||
+      nextSummary.sleepMinutes > 0 ||
+      nextSummary.sleepRecords > 0 ||
+      nextSummary.weightValue
+  )
+
+  if (nextHasSignal || !previousSummary) {
+    return nextSummary
+  }
+
+  return {
+    ...previousSummary,
+    lastSyncAt: nextSummary.lastSyncAt,
+  }
+}
+
+async function fetchFitbitSummary(accessToken, timeZone) {
+  const today = getDateForTimeZone(timeZone)
   const [profile, steps, heart, sleep, weight] = await Promise.all([
     fetchFitbitJson('/1/user/-/profile.json', accessToken, { optional: true }),
-    fetchFitbitJson(`/1/user/-/activities/steps/date/${today}/1d.json`, accessToken, { optional: true }),
+    fetchFitbitJson(`/1/user/-/activities/steps/date/${today}/1d.json`, accessToken),
     fetchFitbitJson(`/1/user/-/activities/heart/date/${today}/1d/1min.json`, accessToken, { optional: true }),
     fetchFitbitJson(`/1.2/user/-/sleep/date/${today}.json`, accessToken, { optional: true }),
     fetchFitbitJson(`/1/user/-/body/log/weight/date/${today}.json`, accessToken, { optional: true }),
@@ -149,7 +183,10 @@ export async function syncFitbitData(store, config) {
     throw new Error('Fitbit is not connected yet.')
   }
 
-  const summary = await fetchFitbitSummary(fitbitState.connection.accessToken)
+  const summary = mergeFitbitSummary(
+    fitbitState.summary,
+    await fetchFitbitSummary(fitbitState.connection.accessToken, config.timeZone)
+  )
 
   return store.saveFitbitState({
     connection: {

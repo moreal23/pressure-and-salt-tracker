@@ -897,6 +897,10 @@ function QuickFoodsPanel({
 }
 
 function PrivacyPanel({ privacyState, setPrivacyState, onSavePin, onClearPin, onLockNow }) {
+  const [showCurrentPin, setShowCurrentPin] = useState(false)
+  const [showNewPin, setShowNewPin] = useState(false)
+  const [showConfirmPin, setShowConfirmPin] = useState(false)
+
   return (
     <section className="panel">
       <div className="panel-heading">
@@ -920,57 +924,72 @@ function PrivacyPanel({ privacyState, setPrivacyState, onSavePin, onClearPin, on
         {privacyState.pinEnabled ? (
           <label>
             <span>Current PIN</span>
-            <input
-              type="password"
-              inputMode="numeric"
-              autoComplete="current-password"
-              value={privacyState.currentPin}
-              onChange={(event) =>
-                setPrivacyState((current) => ({
-                  ...current,
-                  currentPin: event.target.value,
-                  error: '',
-                  message: '',
-                }))
-              }
-            />
+            <div className="password-field">
+              <input
+                type={showCurrentPin ? 'text' : 'password'}
+                inputMode="numeric"
+                autoComplete="current-password"
+                value={privacyState.currentPin}
+                onChange={(event) =>
+                  setPrivacyState((current) => ({
+                    ...current,
+                    currentPin: event.target.value,
+                    error: '',
+                    message: '',
+                  }))
+                }
+              />
+              <button className="button button--ghost password-toggle" type="button" onClick={() => setShowCurrentPin((current) => !current)}>
+                {showCurrentPin ? 'Hide' : 'Show'}
+              </button>
+            </div>
           </label>
         ) : null}
         <label>
           <span>{privacyState.pinEnabled ? 'New PIN' : 'PIN'}</span>
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="new-password"
-            value={privacyState.newPin}
-            onChange={(event) =>
-              setPrivacyState((current) => ({
-                ...current,
-                newPin: event.target.value,
-                error: '',
-                message: '',
-              }))
-            }
-            required
-          />
+          <div className="password-field">
+            <input
+              type={showNewPin ? 'text' : 'password'}
+              inputMode="numeric"
+              autoComplete="new-password"
+              value={privacyState.newPin}
+              onChange={(event) =>
+                setPrivacyState((current) => ({
+                  ...current,
+                  newPin: event.target.value,
+                  error: '',
+                  message: '',
+                }))
+              }
+              required
+            />
+            <button className="button button--ghost password-toggle" type="button" onClick={() => setShowNewPin((current) => !current)}>
+              {showNewPin ? 'Hide' : 'Show'}
+            </button>
+          </div>
         </label>
         <label>
           <span>Confirm PIN</span>
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="new-password"
-            value={privacyState.confirmPin}
-            onChange={(event) =>
-              setPrivacyState((current) => ({
-                ...current,
-                confirmPin: event.target.value,
-                error: '',
-                message: '',
-              }))
-            }
-            required
-          />
+          <div className="password-field">
+            <input
+              type={showConfirmPin ? 'text' : 'password'}
+              inputMode="numeric"
+              autoComplete="new-password"
+              value={privacyState.confirmPin}
+              onChange={(event) =>
+                setPrivacyState((current) => ({
+                  ...current,
+                  confirmPin: event.target.value,
+                  error: '',
+                  message: '',
+                }))
+              }
+              required
+            />
+            <button className="button button--ghost password-toggle" type="button" onClick={() => setShowConfirmPin((current) => !current)}>
+              {showConfirmPin ? 'Hide' : 'Show'}
+            </button>
+          </div>
         </label>
         <div className="inline-form full-width">
           <button className="button button--solid" type="submit" disabled={privacyState.busy === 'save'}>
@@ -1000,7 +1019,9 @@ function PrivacyPanel({ privacyState, setPrivacyState, onSavePin, onClearPin, on
   )
 }
 
-function PrivacyLockScreen({ unlockPin, setUnlockPin, onUnlock, busy, error }) {
+function PrivacyLockScreen({ unlockPin, setUnlockPin, onUnlock, onForgotPin, busy, error }) {
+  const [showUnlockPin, setShowUnlockPin] = useState(false)
+
   return (
     <main className="app-shell loading-shell">
       <div className="loading-card privacy-lock-card">
@@ -1010,20 +1031,31 @@ function PrivacyLockScreen({ unlockPin, setUnlockPin, onUnlock, busy, error }) {
 
         <form className="simple-form" onSubmit={onUnlock}>
           <label htmlFor="unlockPin">PIN</label>
-          <input
-            id="unlockPin"
-            type="password"
-            inputMode="numeric"
-            autoComplete="current-password"
-            value={unlockPin}
-            onChange={(event) => setUnlockPin(event.target.value)}
-            required
-          />
+          <div className="password-field">
+            <input
+              id="unlockPin"
+              type={showUnlockPin ? 'text' : 'password'}
+              inputMode="numeric"
+              autoComplete="current-password"
+              value={unlockPin}
+              onChange={(event) => setUnlockPin(event.target.value)}
+              required
+            />
+            <button className="button button--ghost password-toggle" type="button" onClick={() => setShowUnlockPin((current) => !current)}>
+              {showUnlockPin ? 'Hide' : 'Show'}
+            </button>
+          </div>
           <button className="button button--solid" type="submit" disabled={busy}>
             {busy ? 'Unlocking...' : 'Unlock app'}
           </button>
+          <button className="button button--ghost" type="button" onClick={onForgotPin} disabled={busy}>
+            Forgot PIN
+          </button>
         </form>
 
+        <div className="import-hint">
+          Forgot PIN will remove the simple lock for this app so you can get back in and set a new one.
+        </div>
         {error ? <p className="status status--error">{error}</p> : null}
       </div>
     </main>
@@ -2077,7 +2109,7 @@ function App() {
       setStatus({ loading: false, error: '' })
 
       const lastSyncAt = fitbitData.summary?.lastSyncAt ? new Date(fitbitData.summary.lastSyncAt).getTime() : 0
-      const syncIsStale = !lastSyncAt || Date.now() - lastSyncAt > 2 * 60 * 1000
+      const syncIsStale = !lastSyncAt || Date.now() - lastSyncAt > 90 * 1000
 
       if (
         !options.skipFitbitStartupSync &&
@@ -2354,6 +2386,7 @@ function App() {
         profileName: result.profileName,
         summary: result.summary,
       }))
+      await loadDashboard({ silent: true, skipFitbitStartupSync: true })
 
       if (!options.silent) {
         setSavingState('Fitbit data synced.')
@@ -2414,11 +2447,9 @@ function App() {
     }
 
     const syncIfNeeded = () => {
-      const lastSyncAt = fitbit.summary?.lastSyncAt ? new Date(fitbit.summary.lastSyncAt).getTime() : 0
-      const syncIsStale = !lastSyncAt || Date.now() - lastSyncAt > 5 * 60 * 1000
-      const enoughTimeSinceAttempt = Date.now() - lastAutoSyncAttemptRef.current > 60 * 1000
+      const enoughTimeSinceAttempt = Date.now() - lastAutoSyncAttemptRef.current > 2 * 60 * 1000
 
-      if (!syncIsStale || !enoughTimeSinceAttempt || document.visibilityState === 'hidden') {
+      if (!enoughTimeSinceAttempt || document.visibilityState === 'hidden') {
         return
       }
 
@@ -2428,7 +2459,7 @@ function App() {
 
     syncIfNeeded()
 
-    const intervalId = window.setInterval(syncIfNeeded, 5 * 60 * 1000)
+    const intervalId = window.setInterval(syncIfNeeded, 2 * 60 * 1000)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         syncIfNeeded()
@@ -2806,6 +2837,50 @@ function App() {
     }
   }
 
+  async function handlePrivacyForgotPin() {
+    const confirmed = window.confirm(
+      'Forgot PIN will turn off the simple app lock so you can get back in and set a new one. Continue?'
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setPrivacyState((current) => ({
+      ...current,
+      busy: 'forgot',
+      error: '',
+      message: '',
+    }))
+
+    try {
+      await fetchJson('/api/privacy/forgot-reset', {
+        method: 'POST',
+      })
+
+      window.sessionStorage.removeItem(PRIVACY_UNLOCK_KEY)
+      setPrivacyState((current) => ({
+        ...current,
+        pinEnabled: false,
+        unlocked: true,
+        busy: '',
+        unlockPin: '',
+        currentPin: '',
+        newPin: '',
+        confirmPin: '',
+        error: '',
+        message: 'PIN lock was reset. You can set a new one whenever you want.',
+      }))
+      await loadDashboard({ silent: true, skipFitbitStartupSync: true })
+    } catch (error) {
+      setPrivacyState((current) => ({
+        ...current,
+        busy: '',
+        error: error.message,
+      }))
+    }
+  }
+
   function handlePrivacyLockNow() {
     window.sessionStorage.removeItem(PRIVACY_UNLOCK_KEY)
     setPrivacyState((current) => ({
@@ -3167,7 +3242,8 @@ function App() {
           }))
         }
         onUnlock={handlePrivacyUnlock}
-        busy={privacyState.busy === 'unlock'}
+        onForgotPin={handlePrivacyForgotPin}
+        busy={privacyState.busy === 'unlock' || privacyState.busy === 'forgot'}
         error={privacyState.error}
       />
     )
@@ -3212,16 +3288,15 @@ function App() {
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">Blood Pressure + Sodium Tracker</p>
-          <h1>A local test app you can run before deployment.</h1>
+          <h1>Your daily blood pressure, sodium, and wellness dashboard.</h1>
           <p className="hero-text">
-            This version gives you a real dashboard, daily sodium totals, blood pressure logs,
-            a barcode scan flow for packaged foods, and charts that help you compare your habits.
+            Track blood pressure, sodium intake, medications, Fitbit activity, and food scans in one place with tools that help you stay on top of your daily routine.
           </p>
           <div className="hero-badges">
-            <span>React + Vite</span>
-            <span>Express API</span>
-            <span>PostgreSQL-ready</span>
-            <span>Phone camera scan</span>
+            <span>Blood pressure tracking</span>
+            <span>Sodium goals</span>
+            <span>Medication reminders</span>
+            <span>Barcode food scan</span>
           </div>
           <div className="install-strip">
             <button

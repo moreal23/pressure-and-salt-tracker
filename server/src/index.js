@@ -128,6 +128,7 @@ const fitbitConfig = {
   clientSecret: process.env.FITBIT_CLIENT_SECRET ?? '',
   redirectUri: process.env.FITBIT_REDIRECT_URI ?? 'http://localhost:4000/api/fitbit/callback',
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+  timeZone: process.env.REMINDER_TIMEZONE ?? 'America/New_York',
   scopes: (process.env.FITBIT_SCOPES ?? 'activity heartrate profile sleep weight')
     .split(/\s+/)
     .filter(Boolean),
@@ -210,6 +211,38 @@ async function fetchFitbitJson(path, accessToken, options = {}) {
   return payload
 }
 
+function getDateForTimeZone(timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function mergeFitbitSummary(previousSummary, nextSummary) {
+  const nextHasSignal = Boolean(
+    nextSummary.profileName ||
+      nextSummary.stepsToday > 0 ||
+      nextSummary.restingHeartRate ||
+      nextSummary.latestHeartRate ||
+      nextSummary.sleepMinutes > 0 ||
+      nextSummary.sleepRecords > 0 ||
+      nextSummary.weightValue
+  )
+
+  if (nextHasSignal || !previousSummary) {
+    return nextSummary
+  }
+
+  return {
+    ...previousSummary,
+    lastSyncAt: nextSummary.lastSyncAt,
+  }
+}
+
 async function refreshFitbitConnectionIfNeeded(store) {
   const fitbitState = await store.getFitbitState()
   const connection = fitbitState.connection
@@ -243,10 +276,10 @@ async function refreshFitbitConnectionIfNeeded(store) {
 }
 
 async function fetchFitbitSummary(accessToken) {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = getDateForTimeZone(fitbitConfig.timeZone)
   const [profile, steps, heart, sleep, weight] = await Promise.all([
     fetchFitbitJson('/1/user/-/profile.json', accessToken, { optional: true }),
-    fetchFitbitJson(`/1/user/-/activities/steps/date/${today}/1d.json`, accessToken, { optional: true }),
+    fetchFitbitJson(`/1/user/-/activities/steps/date/${today}/1d.json`, accessToken),
     fetchFitbitJson(`/1/user/-/activities/heart/date/${today}/1d/1min.json`, accessToken, { optional: true }),
     fetchFitbitJson(`/1.2/user/-/sleep/date/${today}.json`, accessToken, { optional: true }),
     fetchFitbitJson(`/1/user/-/body/log/weight/date/${today}.json`, accessToken, { optional: true }),
@@ -279,7 +312,10 @@ async function syncFitbitData(store) {
     throw new Error('Fitbit is not connected yet.')
   }
 
-  const summary = await fetchFitbitSummary(fitbitState.connection.accessToken)
+  const summary = mergeFitbitSummary(
+    fitbitState.summary,
+    await fetchFitbitSummary(fitbitState.connection.accessToken)
+  )
 
   return store.saveFitbitState({
     connection: {
@@ -804,6 +840,16 @@ app.post('/api/privacy/clear', async (request, response, next) => {
       return
     }
 
+    await store.clearPrivacyPinHash()
+    response.json({ pinEnabled: false })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/privacy/forgot-reset', async (request, response, next) => {
+  try {
+    const store = await storePromise
     await store.clearPrivacyPinHash()
     response.json({ pinEnabled: false })
   } catch (error) {
