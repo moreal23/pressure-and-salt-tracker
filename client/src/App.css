@@ -924,6 +924,71 @@ textarea {
   border: 1px solid rgba(22, 48, 47, 0.08);
 }
 
+.checklist-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.checklist-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.checklist-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(22, 48, 47, 0.08);
+}
+
+.checklist-card--taken {
+  border-color: rgba(18, 120, 81, 0.2);
+}
+
+.checklist-card--upcoming {
+  border-color: rgba(198, 93, 54, 0.18);
+}
+
+.checklist-card--missed {
+  border-color: rgba(191, 47, 47, 0.24);
+  background: rgba(255, 246, 246, 0.9);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.status-pill--taken {
+  background: rgba(18, 120, 81, 0.12);
+  color: #136348;
+}
+
+.status-pill--upcoming {
+  background: rgba(198, 93, 54, 0.1);
+  color: #9a4d2e;
+}
+
+.status-pill--missed {
+  background: rgba(191, 47, 47, 0.12);
+  color: #8d1f28;
+}
+
+.status-copy--missed {
+  color: #8d1f28 !important;
+  font-weight: 600;
+}
+
 .today-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

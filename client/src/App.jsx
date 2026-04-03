@@ -199,6 +199,35 @@ function findReminderMedicationLogToday(reminder, medicationLogs) {
   })
 }
 
+function buildMedicationChecklist(reminders, medicationLogs, now = new Date()) {
+  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+
+  return reminders
+    .filter((entry) => entry.enabled && entry.reminderType === 'medication')
+    .sort((left, right) => left.timeOfDay.localeCompare(right.timeOfDay))
+    .map((entry) => {
+      const todayLog = findReminderMedicationLogToday(entry, medicationLogs)
+      let status = 'upcoming'
+      let statusLabel = 'Not taken yet'
+
+      if (todayLog) {
+        status = 'taken'
+        statusLabel = `Taken at ${formatDateTime(todayLog.takenAt)}`
+      } else if (entry.timeOfDay <= currentTime) {
+        status = 'missed'
+        statusLabel = 'Missed today so far'
+      }
+
+      return {
+        ...entry,
+        todayLog,
+        status,
+        statusLabel,
+        displayMedicationName: getReminderMedicationName(entry),
+      }
+    })
+}
+
 function groupMedicationLogsByDay(medicationLogs) {
   const groups = new Map()
 
@@ -527,6 +556,65 @@ function GoalBadgesPanel({ goalBadges }) {
   )
 }
 
+function TodayMedicationChecklistPanel({ checklist, onLogTaken, quickLogReminderId }) {
+  const takenCount = checklist.filter((entry) => entry.status === 'taken').length
+  const missedCount = checklist.filter((entry) => entry.status === 'missed').length
+  const upcomingCount = checklist.filter((entry) => entry.status === 'upcoming').length
+
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Today Medicine</p>
+          <h2>Today medicine checklist</h2>
+        </div>
+        <p className="panel-copy">See what is taken, what is still coming up, and what has been missed today.</p>
+      </div>
+
+      <div className="checklist-summary">
+        <span className="status-pill status-pill--taken">{takenCount} taken</span>
+        <span className="status-pill status-pill--upcoming">{upcomingCount} upcoming</span>
+        <span className="status-pill status-pill--missed">{missedCount} missed</span>
+      </div>
+
+      {checklist.length ? (
+        <ul className="checklist-list">
+          {checklist.map((entry) => (
+            <li key={entry.id} className={`checklist-card checklist-card--${entry.status}`}>
+              <div className="history-main">
+                <div>
+                  <strong>{entry.displayMedicationName}</strong>
+                  <span>{formatTimeOfDay(entry.timeOfDay)}{entry.dosage ? ` • ${entry.dosage}` : ''}</span>
+                </div>
+                <div className="history-actions">
+                  <span className={`status-pill status-pill--${entry.status}`}>{entry.statusLabel}</span>
+                  <button
+                    className="button button--solid"
+                    type="button"
+                    onClick={() => onLogTaken(entry)}
+                    disabled={entry.status === 'taken' || quickLogReminderId === entry.id}
+                  >
+                    {quickLogReminderId === entry.id
+                      ? 'Saving...'
+                      : entry.status === 'missed'
+                        ? 'Log now'
+                        : entry.status === 'taken'
+                          ? 'Taken'
+                          : 'Mark taken'}
+                  </button>
+                </div>
+              </div>
+              {entry.notes ? <p>{entry.notes}</p> : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="import-hint">Add a medication reminder and it will appear in today&apos;s checklist.</div>
+      )}
+    </section>
+  )
+}
+
 function MedicationPanel({
   medicationLogs,
   medicationForm,
@@ -750,9 +838,11 @@ function RemindersPanel({
       <ul className="activity-list">
         {reminders.map((entry) => (
           (() => {
-            const todayLog = entry.reminderType === 'medication'
-              ? findReminderMedicationLogToday(entry, medicationLogs)
-              : null
+            const checklistEntry =
+              entry.reminderType === 'medication'
+                ? buildMedicationChecklist([entry], medicationLogs)[0]
+                : null
+            const todayLog = checklistEntry?.todayLog ?? null
 
             return (
               <li key={entry.id}>
@@ -786,6 +876,9 @@ function RemindersPanel({
                 {entry.medicationName ? <p>Medication: {entry.medicationName}</p> : null}
                 {entry.dosage ? <p>Dosage: {entry.dosage}</p> : null}
                 {todayLog ? <p>Logged today at {formatDateTime(todayLog.takenAt)}.</p> : null}
+                {checklistEntry?.status === 'missed' ? (
+                  <p className="status-copy status-copy--missed">This dose is currently marked as missed today.</p>
+                ) : null}
                 {entry.notes ? <p>{entry.notes}</p> : null}
               </li>
             )
@@ -1671,6 +1764,10 @@ function App() {
   const insights = useMemo(
     () => computeTrendInsights(dashboard, fitbit.summary, medicationLogs),
     [dashboard, fitbit.summary, medicationLogs]
+  )
+  const medicationChecklist = useMemo(
+    () => buildMedicationChecklist(reminders, medicationLogs),
+    [reminders, medicationLogs]
   )
 
   useEffect(() => {
@@ -2858,6 +2955,12 @@ function App() {
         </div>
 
         <div className="content-column">
+          <TodayMedicationChecklistPanel
+            checklist={medicationChecklist}
+            onLogTaken={handleReminderTaken}
+            quickLogReminderId={quickLogReminderId}
+          />
+
           <ScannerPanel
             onLookupComplete={fillFoodFormFromLookup}
             lookupState={lookupState}

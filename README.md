@@ -15,6 +15,7 @@ This folder is a real local test app you can run with `npm run dev` before deplo
 - Includes daily reminders for medicine or check-ins while the app is open
 - Lets you tap a medication reminder to mark it taken and save a daily medication log
 - Automatically clears medication logs from prior weeks so each new week starts fresh
+- Shows a today medicine checklist with taken, upcoming, and missed statuses
 - Includes trend insights across sodium, blood pressure, Fitbit steps, and medication logs
 - Can print a doctor-friendly report or export blood pressure and medication logs to CSV for Excel
 - Can export a full backup file and restore the app from that backup later
