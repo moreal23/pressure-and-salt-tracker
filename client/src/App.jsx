@@ -1120,6 +1120,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
           .catch(() => null)
           .finally(() => {
             scannerInstanceRef.current?.clear().catch(() => null)
+            scannerInstanceRef.current = null
           })
       }
     }
@@ -1160,7 +1161,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
     try {
       await requestCameraPermission()
 
-      const { Html5Qrcode } = await import('html5-qrcode')
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode')
 
       if (!scannerNodeRef.current) {
         throw new Error('Scanner container is not ready yet.')
@@ -1171,9 +1172,23 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
       }
 
       const config = {
-        fps: 10,
-        qrbox: { width: 240, height: 120 },
-        aspectRatio: 1.7777778,
+        fps: 12,
+        qrbox: (viewfinderWidth, viewfinderHeight) => ({
+          width: Math.max(220, Math.min(Math.floor(viewfinderWidth * 0.9), 360)),
+          height: Math.max(110, Math.min(Math.floor(viewfinderHeight * 0.38), 180)),
+        }),
+        aspectRatio: 1.3333333,
+        disableFlip: true,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.CODABAR,
+        ],
       }
       const handleDecodedText = async (decodedText) => {
         setManualBarcode(decodedText)
@@ -1211,7 +1226,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
       setLookupState({
         loading: false,
         error: '',
-        message: 'Point your camera at a package barcode.',
+        message: 'Hold the package barcode inside the scan box and move a little closer if needed.',
       })
     } catch (error) {
       setLookupState({
@@ -1229,6 +1244,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
 
     await scannerInstanceRef.current.stop().catch(() => null)
     await scannerInstanceRef.current.clear().catch(() => null)
+    scannerInstanceRef.current = null
     setScannerReady(false)
     setLookupState({
       loading: false,
