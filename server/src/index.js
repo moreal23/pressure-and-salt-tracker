@@ -31,12 +31,16 @@ const settingsSchema = z.object({
   sodiumGoalMg: z.number().int().min(500).max(10000),
 })
 
+const dateTimeInputSchema = z.string().min(1).refine((value) => !Number.isNaN(new Date(value).getTime()), {
+  message: 'Invalid date/time value.',
+})
+
 const bloodPressureSchema = z.object({
   systolic: z.number().int().min(50).max(280),
   diastolic: z.number().int().min(30).max(200),
   pulse: z.number().int().min(30).max(220),
   notes: z.string().max(600).default(''),
-  recordedAt: z.string().datetime(),
+  recordedAt: dateTimeInputSchema,
 })
 
 const foodLogSchema = z.object({
@@ -45,7 +49,7 @@ const foodLogSchema = z.object({
   sodiumMg: z.number().int().min(0).max(10000),
   mealType: z.string().min(1).max(40).default('Meal'),
   barcode: z.string().max(80).optional().default(''),
-  loggedAt: z.string().datetime(),
+  loggedAt: dateTimeInputSchema,
 })
 
 const importSchema = z.object({
@@ -57,6 +61,36 @@ const goalBadgeSchema = z.object({
   steps: z.number().int().min(0).max(200000),
   sodiumTotalMg: z.number().int().min(0).max(10000),
   sodiumGoalMg: z.number().int().min(500).max(10000),
+})
+
+const medicationSchema = z.object({
+  medicationName: z.string().min(2).max(120),
+  dosage: z.string().min(1).max(80),
+  takenAt: dateTimeInputSchema,
+  notes: z.string().max(300).default(''),
+})
+
+const reminderSchema = z.object({
+  title: z.string().min(2).max(120),
+  reminderType: z.string().min(2).max(40),
+  timeOfDay: z.string().regex(/^\d{2}:\d{2}$/),
+  enabled: z.boolean().default(true),
+  medicationName: z.string().max(120).default(''),
+  notes: z.string().max(300).default(''),
+})
+
+const backupRestoreSchema = z.object({
+  data: z.object({
+    settings: z.object({
+      sodiumGoalMg: z.number().int().min(500).max(10000),
+    }).optional(),
+    bloodPressureLogs: z.array(z.any()).optional(),
+    foodLogs: z.array(z.any()).optional(),
+    medicationLogs: z.array(z.any()).optional(),
+    reminders: z.array(z.any()).optional(),
+    fitbit: z.any().optional(),
+    goalBadges: z.array(z.any()).optional(),
+  }),
 })
 
 let storePromise = createStore()
@@ -559,6 +593,104 @@ app.get('/api/history', async (request, response, next) => {
       bloodPressureLogs,
       foodLogs,
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/medications', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    response.json({
+      medicationLogs: await store.getMedicationLogs(),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/medications', async (request, response, next) => {
+  try {
+    const parsed = medicationSchema.parse(request.body)
+    const store = await storePromise
+    const entry = attachId({
+      ...parsed,
+      takenAt: normalizeToDateTime(parsed.takenAt),
+    })
+    response.status(201).json({ entry: await store.addMedicationLog(entry) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/medications/:id', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const deleted = await store.deleteMedicationLog(request.params.id)
+
+    if (!deleted) {
+      response.status(404).json({ error: 'Medication log not found.' })
+      return
+    }
+
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/reminders', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    response.json({
+      reminders: await store.getReminders(),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/reminders', async (request, response, next) => {
+  try {
+    const parsed = reminderSchema.parse(request.body)
+    const store = await storePromise
+    const entry = attachId(parsed)
+    response.status(201).json({ entry: await store.addReminder(entry) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/reminders/:id', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const deleted = await store.deleteReminder(request.params.id)
+
+    if (!deleted) {
+      response.status(404).json({ error: 'Reminder not found.' })
+      return
+    }
+
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/backup', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    response.json(await store.getBackupData())
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/backup/restore', async (request, response, next) => {
+  try {
+    const parsed = backupRestoreSchema.parse(request.body)
+    const store = await storePromise
+    response.status(201).json(await store.restoreBackupData(parsed.data))
   } catch (error) {
     next(error)
   }

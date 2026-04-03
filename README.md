@@ -11,6 +11,11 @@ This folder is a real local test app you can run with `npm run dev` before deplo
 - Lets you scan or paste food barcodes and look up sodium data
 - Shows weekly charts for sodium and blood pressure trends
 - Includes a full history view for blood pressure and food entries
+- Includes a medication tracker with dosage, notes, and time taken
+- Includes daily reminders for medicine or check-ins while the app is open
+- Includes trend insights across sodium, blood pressure, Fitbit steps, and medication logs
+- Can print a doctor-friendly report or export blood pressure and medication logs to CSV for Excel
+- Can export a full backup file and restore the app from that backup later
 - Includes PWA files so it can be installed on supported phones after deployment
 - Includes a Fitbit OAuth integration panel for steps, heart rate, sleep, and weight
 - Uses PostgreSQL when configured, with a local JSON data file fallback for quick testing
@@ -77,7 +82,16 @@ That fallback is only for local testing. It helps you use the app immediately be
 3. Set the callback URL to `http://localhost:4000/api/fitbit/callback` for local testing
 4. Restart `npm run dev`
 
-Once configured, the app can connect to Fitbit and manually sync supported Fitbit data.
+Once configured, the app can connect to Fitbit, auto-sync when the app opens, and refresh while the app stays open.
+
+## Export, Backup, And Reminders
+
+- `Print or Save PDF` opens a doctor-friendly report with recent blood pressure, food, and medication entries
+- `Export BP CSV` and `Export Medication CSV` create Excel-friendly files
+- `Export Full Backup` downloads a full JSON snapshot of your settings and data
+- `Restore Backup` loads one of those JSON files back into the app
+- Fitbit backup exports keep your synced summary but do not include Fitbit access tokens
+- Reminder notifications appear while the app is open and browser notifications are allowed
 
 ## Cloudflare Workers Setup
 

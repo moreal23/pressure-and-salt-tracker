@@ -12,11 +12,14 @@ import {
   formatDuplicateKey,
   jsonResponse,
   lookupBarcode,
+  parseBackupRestorePayload,
   parseBloodPressurePayload,
   parseFoodLogPayload,
   parseGoalBadgePayload,
   parseImportPayload,
   parseImportedBloodPressureText,
+  parseMedicationPayload,
+  parseReminderPayload,
   parseSettingsPayload,
   readJson,
   toIsoString,
@@ -50,6 +53,67 @@ async function handleApiRequest(request, env) {
       bloodPressureLogs,
       foodLogs,
     })
+  }
+
+  if (pathname === '/api/medications' && method === 'GET') {
+    return jsonResponse({
+      medicationLogs: await store.getMedicationLogs(),
+    })
+  }
+
+  if (pathname === '/api/medications' && method === 'POST') {
+    const body = await readJson(request)
+    const entry = {
+      id: crypto.randomUUID(),
+      ...parseMedicationPayload(body),
+    }
+    return jsonResponse({ entry: await store.addMedicationLog(entry) }, 201)
+  }
+
+  if (pathname.startsWith('/api/medications/') && method === 'DELETE') {
+    const id = pathname.split('/').pop()
+    const deleted = await store.deleteMedicationLog(id)
+
+    if (!deleted) {
+      return errorResponse('Medication log not found.', 404)
+    }
+
+    return jsonResponse({ ok: true })
+  }
+
+  if (pathname === '/api/reminders' && method === 'GET') {
+    return jsonResponse({
+      reminders: await store.getReminders(),
+    })
+  }
+
+  if (pathname === '/api/reminders' && method === 'POST') {
+    const body = await readJson(request)
+    const entry = {
+      id: crypto.randomUUID(),
+      ...parseReminderPayload(body),
+    }
+    return jsonResponse({ entry: await store.addReminder(entry) }, 201)
+  }
+
+  if (pathname.startsWith('/api/reminders/') && method === 'DELETE') {
+    const id = pathname.split('/').pop()
+    const deleted = await store.deleteReminder(id)
+
+    if (!deleted) {
+      return errorResponse('Reminder not found.', 404)
+    }
+
+    return jsonResponse({ ok: true })
+  }
+
+  if (pathname === '/api/backup' && method === 'GET') {
+    return jsonResponse(await store.getBackupData())
+  }
+
+  if (pathname === '/api/backup/restore' && method === 'POST') {
+    const body = await readJson(request)
+    return jsonResponse(await store.restoreBackupData(parseBackupRestorePayload(body)), 201)
   }
 
   if (pathname === '/api/celebrations' && method === 'GET') {

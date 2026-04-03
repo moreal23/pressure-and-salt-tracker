@@ -5,6 +5,14 @@ const { createSeedData } = require('./seed')
 
 const dataFilePath = path.join(__dirname, '..', '..', 'data', 'dev-data.json')
 
+function createBackupSafeFitbitState(fitbitState) {
+  return {
+    connection: null,
+    summary: fitbitState?.summary ?? null,
+    pendingAuthState: '',
+  }
+}
+
 function toDayKey(value) {
   return new Date(value).toISOString().slice(0, 10)
 }
@@ -50,6 +58,12 @@ class JsonStore {
     }
     if (!parsed.goalBadges) {
       parsed.goalBadges = []
+    }
+    if (!parsed.medicationLogs) {
+      parsed.medicationLogs = []
+    }
+    if (!parsed.reminders) {
+      parsed.reminders = []
     }
     return parsed
   }
@@ -180,6 +194,91 @@ class JsonStore {
       badge,
       goalBadges: data.goalBadges,
     }
+  }
+
+  async getMedicationLogs() {
+    const data = await this.readData()
+    return [...data.medicationLogs].sort((left, right) => new Date(right.takenAt) - new Date(left.takenAt))
+  }
+
+  async addMedicationLog(entry) {
+    const data = await this.readData()
+    const nextEntry = {
+      id: randomUUID(),
+      ...entry,
+    }
+    data.medicationLogs.push(nextEntry)
+    await this.writeData(data)
+    return nextEntry
+  }
+
+  async deleteMedicationLog(id) {
+    const data = await this.readData()
+    const nextLogs = data.medicationLogs.filter((entry) => entry.id !== id)
+
+    if (nextLogs.length === data.medicationLogs.length) {
+      return false
+    }
+
+    data.medicationLogs = nextLogs
+    await this.writeData(data)
+    return true
+  }
+
+  async getReminders() {
+    const data = await this.readData()
+    return [...data.reminders].sort((left, right) => left.timeOfDay.localeCompare(right.timeOfDay))
+  }
+
+  async addReminder(entry) {
+    const data = await this.readData()
+    const nextEntry = {
+      id: randomUUID(),
+      ...entry,
+    }
+    data.reminders.push(nextEntry)
+    await this.writeData(data)
+    return nextEntry
+  }
+
+  async deleteReminder(id) {
+    const data = await this.readData()
+    const nextReminders = data.reminders.filter((entry) => entry.id !== id)
+
+    if (nextReminders.length === data.reminders.length) {
+      return false
+    }
+
+    data.reminders = nextReminders
+    await this.writeData(data)
+    return true
+  }
+
+  async getBackupData() {
+    const data = await this.readData()
+    return {
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      data: {
+        ...data,
+        fitbit: createBackupSafeFitbitState(data.fitbit),
+      },
+    }
+  }
+
+  async restoreBackupData(backup) {
+    const nextData = {
+      settings: backup.settings ?? { sodiumGoalMg: 2300 },
+      bloodPressureLogs: backup.bloodPressureLogs ?? [],
+      foodLogs: backup.foodLogs ?? [],
+      medicationLogs: backup.medicationLogs ?? [],
+      reminders: backup.reminders ?? [],
+      fitbit: createBackupSafeFitbitState(backup.fitbit),
+      goalBadges: backup.goalBadges ?? [],
+    }
+
+    await this.writeData(nextData)
+    return this.getBackupData()
   }
 
   async saveFitbitState(nextState) {

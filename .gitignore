@@ -9,4 +9,5 @@ server/data/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+server-*.log
 .DS_Store

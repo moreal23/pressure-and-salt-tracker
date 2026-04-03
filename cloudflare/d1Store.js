@@ -1,5 +1,13 @@
 import { listLastSevenDays, toDayKey } from './shared.js'
 
+function createBackupSafeFitbitState(fitbitState) {
+  return {
+    connection: null,
+    summary: fitbitState?.summary ?? null,
+    pendingAuthState: '',
+  }
+}
+
 export class D1Store {
   constructor(env) {
     this.env = env
@@ -48,6 +56,32 @@ export class D1Store {
           sodium_total_mg INTEGER NOT NULL,
           sodium_goal_mg INTEGER NOT NULL,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `
+    ).run()
+
+    await this.db.prepare(
+      `
+        CREATE TABLE IF NOT EXISTS medication_logs (
+          id TEXT PRIMARY KEY,
+          medication_name TEXT NOT NULL,
+          dosage TEXT NOT NULL,
+          taken_at TEXT NOT NULL,
+          notes TEXT NOT NULL DEFAULT ''
+        )
+      `
+    ).run()
+
+    await this.db.prepare(
+      `
+        CREATE TABLE IF NOT EXISTS reminders (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          reminder_type TEXT NOT NULL,
+          time_of_day TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          medication_name TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT ''
         )
       `
     ).run()
@@ -303,6 +337,199 @@ export class D1Store {
         : null,
       goalBadges: await this.getGoalBadges(),
     }
+  }
+
+  async getMedicationLogs() {
+    await this.ensureSetup()
+    const result = await this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            medication_name AS medicationName,
+            dosage,
+            taken_at AS takenAt,
+            notes
+          FROM medication_logs
+          ORDER BY taken_at DESC
+        `
+      )
+      .all()
+
+    return result.results ?? []
+  }
+
+  async addMedicationLog(entry) {
+    await this.ensureSetup()
+    await this.db
+      .prepare(
+        `
+          INSERT INTO medication_logs (id, medication_name, dosage, taken_at, notes)
+          VALUES (?, ?, ?, ?, ?)
+        `
+      )
+      .bind(entry.id, entry.medicationName, entry.dosage, entry.takenAt, entry.notes)
+      .run()
+
+    return entry
+  }
+
+  async deleteMedicationLog(id) {
+    await this.ensureSetup()
+    const result = await this.db.prepare('DELETE FROM medication_logs WHERE id = ?').bind(id).run()
+    return Number(result.meta?.changes ?? 0) > 0
+  }
+
+  async getReminders() {
+    await this.ensureSetup()
+    const result = await this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            title,
+            reminder_type AS reminderType,
+            time_of_day AS timeOfDay,
+            enabled,
+            medication_name AS medicationName,
+            notes
+          FROM reminders
+          ORDER BY time_of_day ASC, title ASC
+        `
+      )
+      .all()
+
+    return (result.results ?? []).map((row) => ({
+      ...row,
+      enabled: Boolean(row.enabled),
+    }))
+  }
+
+  async addReminder(entry) {
+    await this.ensureSetup()
+    await this.db
+      .prepare(
+        `
+          INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `
+      )
+      .bind(
+        entry.id,
+        entry.title,
+        entry.reminderType,
+        entry.timeOfDay,
+        entry.enabled ? 1 : 0,
+        entry.medicationName,
+        entry.notes
+      )
+      .run()
+
+    return entry
+  }
+
+  async deleteReminder(id) {
+    await this.ensureSetup()
+    const result = await this.db.prepare('DELETE FROM reminders WHERE id = ?').bind(id).run()
+    return Number(result.meta?.changes ?? 0) > 0
+  }
+
+  async getBackupData() {
+    const [settings, bloodPressureLogs, foodLogs, medicationLogs, reminders, fitbit, goalBadges] =
+      await Promise.all([
+        this.getSettings(),
+        this.getBloodPressureLogs(),
+        this.getFoodLogs(),
+        this.getMedicationLogs(),
+        this.getReminders(),
+        this.getFitbitState(),
+        this.getGoalBadges(),
+      ])
+
+    return {
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      data: {
+        settings,
+        bloodPressureLogs,
+        foodLogs,
+        medicationLogs,
+        reminders,
+        fitbit: createBackupSafeFitbitState(fitbit),
+        goalBadges,
+      },
+    }
+  }
+
+  async restoreBackupData(backup) {
+    await this.ensureSetup()
+    await this.db.batch([
+      this.db.prepare('DELETE FROM blood_pressure_logs'),
+      this.db.prepare('DELETE FROM food_logs'),
+      this.db.prepare('DELETE FROM medication_logs'),
+      this.db.prepare('DELETE FROM reminders'),
+      this.db.prepare('DELETE FROM goal_badges'),
+      this.db.prepare('DELETE FROM fitbit_connection'),
+    ])
+
+    await this.updateSettings(backup.settings ?? { sodiumGoalMg: 2300 })
+
+    for (const entry of backup.bloodPressureLogs ?? []) {
+      await this.addBloodPressureLog({
+        id: entry.id,
+        systolic: Number(entry.systolic),
+        diastolic: Number(entry.diastolic),
+        pulse: Number(entry.pulse),
+        notes: entry.notes ?? '',
+        recordedAt: entry.recordedAt,
+      })
+    }
+
+    for (const entry of backup.foodLogs ?? []) {
+      await this.addFoodLog({
+        id: entry.id,
+        foodName: entry.foodName,
+        servingSize: entry.servingSize,
+        sodiumMg: Number(entry.sodiumMg),
+        mealType: entry.mealType,
+        barcode: entry.barcode ?? '',
+        loggedAt: entry.loggedAt,
+      })
+    }
+
+    for (const entry of backup.medicationLogs ?? []) {
+      await this.addMedicationLog({
+        id: entry.id,
+        medicationName: entry.medicationName,
+        dosage: entry.dosage,
+        takenAt: entry.takenAt,
+        notes: entry.notes ?? '',
+      })
+    }
+
+    for (const entry of backup.reminders ?? []) {
+      await this.addReminder({
+        id: entry.id,
+        title: entry.title,
+        reminderType: entry.reminderType,
+        timeOfDay: entry.timeOfDay,
+        enabled: entry.enabled !== false,
+        medicationName: entry.medicationName ?? '',
+        notes: entry.notes ?? '',
+      })
+    }
+
+    for (const entry of backup.goalBadges ?? []) {
+      await this.claimGoalBadge({
+        date: entry.date,
+        steps: Number(entry.steps),
+        sodiumTotalMg: Number(entry.sodiumTotalMg),
+        sodiumGoalMg: Number(entry.sodiumGoalMg),
+      })
+    }
+
+    await this.saveFitbitState(createBackupSafeFitbitState(backup.fitbit))
+    return this.getBackupData()
   }
 
   async saveFitbitState(nextState) {

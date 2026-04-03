@@ -32,10 +32,26 @@ const emptyFoodForm = {
   loggedAt: '',
 }
 
+const emptyMedicationForm = {
+  medicationName: '',
+  dosage: '',
+  takenAt: '',
+  notes: '',
+}
+
+const emptyReminderForm = {
+  title: '',
+  reminderType: 'medication',
+  timeOfDay: '08:00',
+  medicationName: '',
+  notes: '',
+}
+
 const importExample = `date,time,systolic,diastolic,pulse,notes
 04/03/2026,8:15 AM,132,84,75,Morning reading
 04/04/2026,7:40 AM,128,82,71,Before breakfast`
 const CELEBRATION_STEPS_GOAL = 15000
+const REMINDER_CHECK_INTERVAL_MS = 30_000
 
 function formatImportDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -127,6 +143,91 @@ function formatDay(value) {
     month: 'short',
     day: 'numeric',
   }).format(new Date(normalizedValue))
+}
+
+function formatDateOnly(value) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(value))
+}
+
+function escapeCsvCell(value) {
+  const normalized = String(value ?? '')
+  return /[",\n]/.test(normalized) ? `"${normalized.replace(/"/g, '""')}"` : normalized
+}
+
+function downloadFile(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function buildCsv(rows, headers) {
+  const lines = [headers.join(',')]
+  for (const row of rows) {
+    lines.push(headers.map((header) => escapeCsvCell(row[header])).join(','))
+  }
+  return lines.join('\n')
+}
+
+function getReminderDueKey(reminderId, dayKey, timeOfDay) {
+  return `${reminderId}|${dayKey}|${timeOfDay}`
+}
+
+function computeTrendInsights(dashboard, fitbitSummary, medicationLogs) {
+  if (!dashboard) {
+    return []
+  }
+
+  const insights = []
+  const activeTrendDays = dashboard.weeklyTrend.filter((entry) => entry.averageSystolic > 0)
+
+  if (activeTrendDays.length >= 2) {
+    const highestSodiumDay = [...activeTrendDays].sort((left, right) => right.sodiumTotalMg - left.sodiumTotalMg)[0]
+    const lowestSodiumDay = [...activeTrendDays].sort((left, right) => left.sodiumTotalMg - right.sodiumTotalMg)[0]
+
+    if (highestSodiumDay && lowestSodiumDay && highestSodiumDay.averageSystolic > lowestSodiumDay.averageSystolic) {
+      insights.push(
+        `Higher sodium day ${highestSodiumDay.label} (${highestSodiumDay.sodiumTotalMg} mg) matched a higher average systolic reading than your lighter sodium day ${lowestSodiumDay.label}.`
+      )
+    }
+  }
+
+  if (dashboard.latestBloodPressure && dashboard.weeklySummary.averageSystolic) {
+    const difference = dashboard.latestBloodPressure.systolic - dashboard.weeklySummary.averageSystolic
+
+    if (Math.abs(difference) >= 8) {
+      insights.push(
+        difference > 0
+          ? `Your latest systolic reading is ${difference} points above your weekly average.`
+          : `Your latest systolic reading is ${Math.abs(difference)} points below your weekly average.`
+      )
+    }
+  }
+
+  if (fitbitSummary?.stepsToday >= CELEBRATION_STEPS_GOAL) {
+    insights.push(`You already reached your ${CELEBRATION_STEPS_GOAL.toLocaleString()} step goal today.`)
+  } else if (fitbitSummary?.stepsToday) {
+    insights.push(
+      `You are ${(CELEBRATION_STEPS_GOAL - fitbitSummary.stepsToday).toLocaleString()} steps away from today's celebration goal.`
+    )
+  }
+
+  const medicationToday = medicationLogs.filter(
+    (entry) => new Date(entry.takenAt).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
+  )
+
+  if (medicationToday.length) {
+    insights.push(`You logged ${medicationToday.length} medication ${medicationToday.length === 1 ? 'dose' : 'doses'} today.`)
+  }
+
+  return insights.slice(0, 4)
 }
 
 function getLocalDateTimeValue() {
@@ -284,6 +385,266 @@ function GoalBadgesPanel({ goalBadges }) {
           Your first gold badge will appear here after you reach 15,000 steps and stay within your sodium goal for the day.
         </div>
       )}
+    </section>
+  )
+}
+
+function MedicationPanel({
+  medicationLogs,
+  medicationForm,
+  setMedicationForm,
+  onSubmit,
+  onDelete,
+  deletingId,
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Medication</p>
+          <h2>Track medicine doses</h2>
+        </div>
+        <p className="panel-copy">Log what you took, the dosage, and when you took it.</p>
+      </div>
+
+      <form className="form-grid" onSubmit={onSubmit}>
+        <label>
+          <span>Medication name</span>
+          <input
+            type="text"
+            value={medicationForm.medicationName}
+            onChange={(event) =>
+              setMedicationForm((current) => ({ ...current, medicationName: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <label>
+          <span>Dosage</span>
+          <input
+            type="text"
+            value={medicationForm.dosage}
+            onChange={(event) =>
+              setMedicationForm((current) => ({ ...current, dosage: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <label>
+          <span>Date and time</span>
+          <input
+            type="datetime-local"
+            value={medicationForm.takenAt}
+            onChange={(event) =>
+              setMedicationForm((current) => ({ ...current, takenAt: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <label className="full-width">
+          <span>Notes</span>
+          <textarea
+            rows="2"
+            value={medicationForm.notes}
+            onChange={(event) =>
+              setMedicationForm((current) => ({ ...current, notes: event.target.value }))
+            }
+          />
+        </label>
+        <button className="button button--solid" type="submit">
+          Save medication log
+        </button>
+      </form>
+
+      <ul className="activity-list">
+        {medicationLogs.slice(0, 6).map((entry) => (
+          <li key={entry.id}>
+            <div className="history-main">
+              <div>
+                <strong>{entry.medicationName}</strong>
+                <span>{entry.dosage}</span>
+              </div>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => onDelete(entry)}
+                disabled={deletingId === entry.id}
+              >
+                {deletingId === entry.id ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+            <small>{formatDateTime(entry.takenAt)}</small>
+            {entry.notes ? <p>{entry.notes}</p> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function RemindersPanel({
+  reminders,
+  reminderForm,
+  setReminderForm,
+  notificationPermission,
+  onEnableNotifications,
+  onSubmit,
+  onDelete,
+  deletingId,
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Reminders</p>
+          <h2>Daily reminders</h2>
+        </div>
+        <p className="panel-copy">Set medicine or check-in reminders that appear while the app is open.</p>
+      </div>
+
+      <div className="fitbit-actions">
+        <button className="button button--ghost" type="button" onClick={onEnableNotifications}>
+          Notifications: {notificationPermission}
+        </button>
+      </div>
+
+      <form className="form-grid" onSubmit={onSubmit}>
+        <label className="full-width">
+          <span>Reminder title</span>
+          <input
+            type="text"
+            value={reminderForm.title}
+            onChange={(event) =>
+              setReminderForm((current) => ({ ...current, title: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <label>
+          <span>Type</span>
+          <select
+            value={reminderForm.reminderType}
+            onChange={(event) =>
+              setReminderForm((current) => ({ ...current, reminderType: event.target.value }))
+            }
+          >
+            <option value="medication">Medication</option>
+            <option value="blood-pressure">Blood pressure</option>
+            <option value="general">General</option>
+          </select>
+        </label>
+        <label>
+          <span>Time</span>
+          <input
+            type="time"
+            value={reminderForm.timeOfDay}
+            onChange={(event) =>
+              setReminderForm((current) => ({ ...current, timeOfDay: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <label>
+          <span>Medication name</span>
+          <input
+            type="text"
+            value={reminderForm.medicationName}
+            onChange={(event) =>
+              setReminderForm((current) => ({ ...current, medicationName: event.target.value }))
+            }
+          />
+        </label>
+        <label className="full-width">
+          <span>Notes</span>
+          <textarea
+            rows="2"
+            value={reminderForm.notes}
+            onChange={(event) =>
+              setReminderForm((current) => ({ ...current, notes: event.target.value }))
+            }
+          />
+        </label>
+        <button className="button button--solid" type="submit">
+          Save reminder
+        </button>
+      </form>
+
+      <ul className="activity-list">
+        {reminders.map((entry) => (
+          <li key={entry.id}>
+            <div className="history-main">
+              <div>
+                <strong>{entry.title}</strong>
+                <span>{entry.timeOfDay}</span>
+              </div>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={() => onDelete(entry)}
+                disabled={deletingId === entry.id}
+              >
+                {deletingId === entry.id ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+            <small>{entry.reminderType}</small>
+            {entry.medicationName ? <p>Medication: {entry.medicationName}</p> : null}
+            {entry.notes ? <p>{entry.notes}</p> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function ExportPanel({ onPrintReport, onExportBloodPressureCsv, onExportMedicationCsv, onBackupExport, onBackupImport }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Export</p>
+          <h2>Print and save your data</h2>
+        </div>
+        <p className="panel-copy">Create a doctor-friendly report or save data for Excel and backup.</p>
+      </div>
+
+      <div className="export-grid">
+        <button className="button button--solid" type="button" onClick={onPrintReport}>
+          Print or Save PDF
+        </button>
+        <button className="button button--ghost" type="button" onClick={onExportBloodPressureCsv}>
+          Export BP CSV
+        </button>
+        <button className="button button--ghost" type="button" onClick={onExportMedicationCsv}>
+          Export Medication CSV
+        </button>
+        <button className="button button--ghost" type="button" onClick={onBackupExport}>
+          Export Full Backup
+        </button>
+        <label className="button button--ghost export-upload">
+          Restore Backup
+          <input type="file" accept="application/json" onChange={onBackupImport} />
+        </label>
+      </div>
+    </section>
+  )
+}
+
+function InsightsPanel({ insights }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Insights</p>
+          <h2>Trend insights</h2>
+        </div>
+        <p className="panel-copy">Helpful patterns pulled from your recent blood pressure, sodium, and Fitbit data.</p>
+      </div>
+
+      <ul className="insight-list">
+        {insights.map((insight) => (
+          <li key={insight}>{insight}</li>
+        ))}
+      </ul>
     </section>
   )
 }
@@ -888,6 +1249,16 @@ function App() {
   })
   const [goalValue, setGoalValue] = useState('2300')
   const [savingState, setSavingState] = useState('')
+  const [medicationLogs, setMedicationLogs] = useState([])
+  const [reminders, setReminders] = useState([])
+  const [medicationForm, setMedicationForm] = useState({
+    ...emptyMedicationForm,
+    takenAt: getLocalDateTimeValue(),
+  })
+  const [reminderForm, setReminderForm] = useState(emptyReminderForm)
+  const [notificationPermission, setNotificationPermission] = useState(
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
+  )
   const [lookupState, setLookupState] = useState({
     loading: false,
     error: '',
@@ -911,6 +1282,7 @@ function App() {
   const playedBadgeDatesRef = useRef(new Set())
   const fitbitSyncInFlightRef = useRef(false)
   const lastAutoSyncAttemptRef = useRef(0)
+  const triggeredRemindersRef = useRef(new Set())
 
   const foodAssessment = useMemo(() => {
     if (!dashboard) {
@@ -930,16 +1302,20 @@ function App() {
     }
 
     try {
-      const [dashboardData, historyData, fitbitData, celebrationsData] = await Promise.all([
+      const [dashboardData, historyData, fitbitData, celebrationsData, medicationData, reminderData] = await Promise.all([
         fetchJson('/api/dashboard'),
         fetchJson('/api/history'),
         fetchJson('/api/fitbit/status'),
         fetchJson('/api/celebrations'),
+        fetchJson('/api/medications'),
+        fetchJson('/api/reminders'),
       ])
       setDashboard(dashboardData)
       setHistory(historyData)
       setFitbit(fitbitData)
       setGoalBadges(celebrationsData.goalBadges ?? [])
+      setMedicationLogs(medicationData.medicationLogs ?? [])
+      setReminders(reminderData.reminders ?? [])
       setGoalValue(String(dashboardData.settings.sodiumGoalMg))
       setStatus({ loading: false, error: '' })
     } catch (error) {
@@ -1003,6 +1379,12 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (typeof Notification !== 'undefined') {
+      setNotificationPermission(Notification.permission)
+    }
+  }, [])
+
   const sodiumTone = useMemo(() => {
     if (!dashboard) {
       return 'neutral'
@@ -1037,6 +1419,11 @@ function App() {
       sodiumGoalMg: dashboard.settings.sodiumGoalMg,
     }
   }, [dashboard, fitbit.summary?.stepsToday])
+
+  const insights = useMemo(
+    () => computeTrendInsights(dashboard, fitbit.summary, medicationLogs),
+    [dashboard, fitbit.summary, medicationLogs]
+  )
 
   useEffect(() => {
     if (!celebration || !dashboard) {
@@ -1223,6 +1610,46 @@ function App() {
     }
   }, [fitbit.connected, fitbit.configured, fitbit.summary?.lastSyncAt])
 
+  useEffect(() => {
+    if (!reminders.length) {
+      return
+    }
+
+    const notifyDueReminders = () => {
+      const now = new Date()
+      const dayKey = now.toISOString().slice(0, 10)
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+
+      for (const reminder of reminders) {
+        if (!reminder.enabled || reminder.timeOfDay !== currentTime) {
+          continue
+        }
+
+        const dueKey = getReminderDueKey(reminder.id, dayKey, reminder.timeOfDay)
+
+        if (triggeredRemindersRef.current.has(dueKey)) {
+          continue
+        }
+
+        triggeredRemindersRef.current.add(dueKey)
+        setSavingState(`Reminder: ${reminder.title}`)
+
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification(reminder.title, {
+            body: reminder.notes || `${reminder.reminderType} reminder for ${reminder.timeOfDay}`,
+          })
+        }
+      }
+    }
+
+    notifyDueReminders()
+    const intervalId = window.setInterval(notifyDueReminders, REMINDER_CHECK_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [reminders])
+
   async function handleGoalSubmit(event) {
     event.preventDefault()
     setSavingState('Saving sodium goal...')
@@ -1236,6 +1663,210 @@ function App() {
       setSavingState('Daily sodium goal updated.')
     } catch (error) {
       setSavingState(error.message)
+    }
+  }
+
+  async function handleMedicationSubmit(event) {
+    event.preventDefault()
+    setSavingState('Saving medication log...')
+
+    try {
+      await fetchJson('/api/medications', {
+        method: 'POST',
+        body: JSON.stringify(medicationForm),
+      })
+      setMedicationForm({
+        ...emptyMedicationForm,
+        takenAt: getLocalDateTimeValue(),
+      })
+      await loadDashboard({ silent: true })
+      setSavingState('Medication log saved.')
+    } catch (error) {
+      setSavingState(error.message)
+    }
+  }
+
+  async function handleDeleteMedication(entry) {
+    if (!window.confirm(`Delete medication log for ${entry.medicationName}?`)) {
+      return
+    }
+
+    setDeletingId(entry.id)
+    setSavingState('Deleting medication log...')
+
+    try {
+      await fetchJson(`/api/medications/${entry.id}`, { method: 'DELETE' })
+      await loadDashboard({ silent: true })
+      setSavingState('Medication log deleted.')
+    } catch (error) {
+      setSavingState(error.message)
+    } finally {
+      setDeletingId('')
+    }
+  }
+
+  async function handleReminderSubmit(event) {
+    event.preventDefault()
+    setSavingState('Saving reminder...')
+
+    try {
+      await fetchJson('/api/reminders', {
+        method: 'POST',
+        body: JSON.stringify({ ...reminderForm, enabled: true }),
+      })
+      setReminderForm(emptyReminderForm)
+      await loadDashboard({ silent: true })
+      setSavingState('Reminder saved.')
+    } catch (error) {
+      setSavingState(error.message)
+    }
+  }
+
+  async function handleDeleteReminder(entry) {
+    if (!window.confirm(`Delete reminder "${entry.title}"?`)) {
+      return
+    }
+
+    setDeletingId(entry.id)
+    setSavingState('Deleting reminder...')
+
+    try {
+      await fetchJson(`/api/reminders/${entry.id}`, { method: 'DELETE' })
+      await loadDashboard({ silent: true })
+      setSavingState('Reminder deleted.')
+    } catch (error) {
+      setSavingState(error.message)
+    } finally {
+      setDeletingId('')
+    }
+  }
+
+  async function handleEnableNotifications() {
+    if (typeof Notification === 'undefined') {
+      setSavingState('Notifications are not supported in this browser.')
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    setNotificationPermission(permission)
+    setSavingState(
+      permission === 'granted'
+        ? 'Reminder notifications are enabled.'
+        : 'Browser notifications are still blocked, so reminders will only show while the app is open.'
+    )
+  }
+
+  function handleExportBloodPressureCsv() {
+    const csv = buildCsv(
+      history.bloodPressureLogs.map((entry) => ({
+        recordedAt: entry.recordedAt,
+        systolic: entry.systolic,
+        diastolic: entry.diastolic,
+        pulse: entry.pulse,
+        notes: entry.notes,
+      })),
+      ['recordedAt', 'systolic', 'diastolic', 'pulse', 'notes']
+    )
+    downloadFile(`blood-pressure-${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8')
+  }
+
+  function handleExportMedicationCsv() {
+    const csv = buildCsv(
+      medicationLogs.map((entry) => ({
+        takenAt: entry.takenAt,
+        medicationName: entry.medicationName,
+        dosage: entry.dosage,
+        notes: entry.notes,
+      })),
+      ['takenAt', 'medicationName', 'dosage', 'notes']
+    )
+    downloadFile(`medication-log-${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8')
+  }
+
+  function handlePrintReport() {
+    const reportWindow = window.open('', '_blank', 'width=900,height=1200')
+
+    if (!reportWindow || !dashboard) {
+      setSavingState('The report window could not open. Please allow popups for this site.')
+      return
+    }
+
+    const medicationList = medicationLogs
+      .slice(0, 12)
+      .map((entry) => `<li>${formatDateTime(entry.takenAt)} - ${entry.medicationName} ${entry.dosage}</li>`)
+      .join('')
+    const bpList = history.bloodPressureLogs
+      .slice(0, 12)
+      .map((entry) => `<li>${formatDateTime(entry.recordedAt)} - ${entry.systolic}/${entry.diastolic}, pulse ${entry.pulse}</li>`)
+      .join('')
+    const foodList = history.foodLogs
+      .slice(0, 12)
+      .map((entry) => `<li>${formatDateTime(entry.loggedAt)} - ${entry.foodName} (${entry.sodiumMg} mg)</li>`)
+      .join('')
+
+    reportWindow.document.write(`
+      <html>
+        <head>
+          <title>Health Tracking Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #203030; }
+            h1, h2 { margin-bottom: 8px; }
+            section { margin-bottom: 24px; }
+            ul { padding-left: 20px; }
+          </style>
+        </head>
+        <body>
+          <h1>Blood Pressure and Sodium Report</h1>
+          <p>Generated ${new Date().toLocaleString()}</p>
+          <section>
+            <h2>Today</h2>
+            <p>Sodium: ${dashboard.today.sodiumTotalMg} / ${dashboard.settings.sodiumGoalMg} mg</p>
+            <p>Steps: ${(fitbit.summary?.stepsToday ?? 0).toLocaleString()}</p>
+          </section>
+          <section><h2>Recent Blood Pressure</h2><ul>${bpList}</ul></section>
+          <section><h2>Recent Food Logs</h2><ul>${foodList}</ul></section>
+          <section><h2>Medication Logs</h2><ul>${medicationList}</ul></section>
+        </body>
+      </html>
+    `)
+    reportWindow.document.close()
+    reportWindow.focus()
+    reportWindow.print()
+  }
+
+  async function handleBackupExport() {
+    try {
+      const backup = await fetchJson('/api/backup')
+      downloadFile(
+        `pressure-salt-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        JSON.stringify(backup, null, 2),
+        'application/json;charset=utf-8'
+      )
+      setSavingState('Backup exported.')
+    } catch (error) {
+      setSavingState(error.message)
+    }
+  }
+
+  async function handleBackupImport(event) {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(await file.text())
+      await fetchJson('/api/backup/restore', {
+        method: 'POST',
+        body: JSON.stringify(parsed),
+      })
+      await loadDashboard({ silent: true })
+      setSavingState('Backup restored successfully.')
+    } catch (error) {
+      setSavingState(error.message || 'Backup restore failed.')
+    } finally {
+      event.target.value = ''
     }
   }
 
@@ -1638,6 +2269,14 @@ function App() {
             onDisconnect={handleFitbitDisconnect}
           />
 
+          <ExportPanel
+            onPrintReport={handlePrintReport}
+            onExportBloodPressureCsv={handleExportBloodPressureCsv}
+            onExportMedicationCsv={handleExportMedicationCsv}
+            onBackupExport={handleBackupExport}
+            onBackupImport={handleBackupImport}
+          />
+
           <section className="panel">
             <div className="panel-heading">
               <div>
@@ -1713,6 +2352,15 @@ function App() {
               </button>
             </form>
           </section>
+
+          <MedicationPanel
+            medicationLogs={medicationLogs}
+            medicationForm={medicationForm}
+            setMedicationForm={setMedicationForm}
+            onSubmit={handleMedicationSubmit}
+            onDelete={handleDeleteMedication}
+            deletingId={deletingId}
+          />
 
           <section className="panel">
             <div className="panel-heading">
@@ -1933,6 +2581,19 @@ function App() {
             lookupState={lookupState}
             setLookupState={setLookupState}
           />
+
+          <RemindersPanel
+            reminders={reminders}
+            reminderForm={reminderForm}
+            setReminderForm={setReminderForm}
+            notificationPermission={notificationPermission}
+            onEnableNotifications={handleEnableNotifications}
+            onSubmit={handleReminderSubmit}
+            onDelete={handleDeleteReminder}
+            deletingId={deletingId}
+          />
+
+          <InsightsPanel insights={insights} />
 
           <section className="panel">
             <div className="panel-heading">

@@ -136,6 +136,40 @@ export function parseGoalBadgePayload(body) {
   }
 }
 
+export function parseMedicationPayload(body) {
+  return {
+    medicationName: ensureString(body?.medicationName, 'Medication name', 2, 120),
+    dosage: ensureString(body?.dosage, 'Dosage', 1, 80),
+    takenAt: toIsoString(body?.takenAt),
+    notes: ensureString(body?.notes ?? '', 'Notes', 0, 300),
+  }
+}
+
+export function parseReminderPayload(body) {
+  const timeOfDay = ensureString(body?.timeOfDay, 'Reminder time', 5, 5)
+
+  if (!/^\d{2}:\d{2}$/.test(timeOfDay)) {
+    throw new Error('Reminder time must be in HH:MM format.')
+  }
+
+  return {
+    title: ensureString(body?.title, 'Reminder title', 2, 120),
+    reminderType: ensureString(body?.reminderType ?? 'general', 'Reminder type', 2, 40),
+    timeOfDay,
+    enabled: body?.enabled !== false,
+    medicationName: ensureString(body?.medicationName ?? '', 'Medication name', 0, 120),
+    notes: ensureString(body?.notes ?? '', 'Notes', 0, 300),
+  }
+}
+
+export function parseBackupRestorePayload(body) {
+  if (!body?.data || typeof body.data !== 'object') {
+    throw new Error('Backup restore file is missing its data section.')
+  }
+
+  return body.data
+}
+
 export function normalizeHeaderName(value) {
   return String(value ?? '')
     .toLowerCase()

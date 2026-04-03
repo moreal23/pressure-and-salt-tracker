@@ -1,5 +1,12 @@
 const { Pool } = require('pg')
 
+function createBackupSafeFitbitState(fitbitState) {
+  return {
+    connection: null,
+    summary: fitbitState?.summary ?? null,
+  }
+}
+
 function toDayKey(value) {
   return new Date(value).toISOString().slice(0, 10)
 }
@@ -74,6 +81,24 @@ class PostgresStore {
         sodium_total_mg INTEGER NOT NULL,
         sodium_goal_mg INTEGER NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS medication_logs (
+        id UUID PRIMARY KEY,
+        medication_name TEXT NOT NULL,
+        dosage TEXT NOT NULL,
+        taken_at TIMESTAMPTZ NOT NULL,
+        notes TEXT NOT NULL DEFAULT ''
+      );
+
+      CREATE TABLE IF NOT EXISTS reminders (
+        id UUID PRIMARY KEY,
+        title TEXT NOT NULL,
+        reminder_type TEXT NOT NULL,
+        time_of_day TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        medication_name TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT ''
       );
 
       INSERT INTO app_settings (id, sodium_goal_mg)
@@ -274,6 +299,225 @@ class PostgresStore {
       badge: savedBadge,
       goalBadges: await this.getGoalBadges(),
     }
+  }
+
+  async getMedicationLogs() {
+    const result = await this.pool.query(
+      `
+        SELECT
+          id,
+          medication_name AS "medicationName",
+          dosage,
+          taken_at AS "takenAt",
+          notes
+        FROM medication_logs
+        ORDER BY taken_at DESC
+      `
+    )
+
+    return result.rows
+  }
+
+  async addMedicationLog(entry) {
+    await this.pool.query(
+      `
+        INSERT INTO medication_logs (id, medication_name, dosage, taken_at, notes)
+        VALUES ($1, $2, $3, $4, $5)
+      `,
+      [entry.id, entry.medicationName, entry.dosage, entry.takenAt, entry.notes]
+    )
+
+    return entry
+  }
+
+  async deleteMedicationLog(id) {
+    const result = await this.pool.query('DELETE FROM medication_logs WHERE id = $1', [id])
+    return result.rowCount > 0
+  }
+
+  async getReminders() {
+    const result = await this.pool.query(
+      `
+        SELECT
+          id,
+          title,
+          reminder_type AS "reminderType",
+          time_of_day AS "timeOfDay",
+          enabled,
+          medication_name AS "medicationName",
+          notes
+        FROM reminders
+        ORDER BY time_of_day ASC, title ASC
+      `
+    )
+
+    return result.rows
+  }
+
+  async addReminder(entry) {
+    await this.pool.query(
+      `
+        INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `,
+      [
+        entry.id,
+        entry.title,
+        entry.reminderType,
+        entry.timeOfDay,
+        entry.enabled,
+        entry.medicationName,
+        entry.notes,
+      ]
+    )
+
+    return entry
+  }
+
+  async deleteReminder(id) {
+    const result = await this.pool.query('DELETE FROM reminders WHERE id = $1', [id])
+    return result.rowCount > 0
+  }
+
+  async getBackupData() {
+    const [settings, bloodPressureLogs, foodLogs, medicationLogs, reminders, fitbitState, goalBadges] =
+      await Promise.all([
+        this.getSettings(),
+        this.getBloodPressureLogs(),
+        this.getFoodLogs(),
+        this.getMedicationLogs(),
+        this.getReminders(),
+        this.getFitbitState(),
+        this.getGoalBadges(),
+      ])
+
+    return {
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      data: {
+        settings,
+        bloodPressureLogs,
+        foodLogs,
+        medicationLogs,
+        reminders,
+        fitbit: createBackupSafeFitbitState(fitbitState),
+        goalBadges,
+      },
+    }
+  }
+
+  async restoreBackupData(backup) {
+    const client = await this.pool.connect()
+
+    try {
+      await client.query('BEGIN')
+      await client.query('DELETE FROM blood_pressure_logs')
+      await client.query('DELETE FROM food_logs')
+      await client.query('DELETE FROM medication_logs')
+      await client.query('DELETE FROM reminders')
+      await client.query('DELETE FROM goal_badges')
+      await client.query('DELETE FROM fitbit_connection')
+
+      if (backup.settings?.sodiumGoalMg) {
+        await client.query(
+          `
+            INSERT INTO app_settings (id, sodium_goal_mg, updated_at)
+            VALUES (1, $1, NOW())
+            ON CONFLICT (id)
+            DO UPDATE SET sodium_goal_mg = EXCLUDED.sodium_goal_mg, updated_at = NOW()
+          `,
+          [backup.settings.sodiumGoalMg]
+        )
+      }
+
+      for (const entry of backup.bloodPressureLogs ?? []) {
+        await client.query(
+          `
+            INSERT INTO blood_pressure_logs (id, systolic, diastolic, pulse, notes, recorded_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+          `,
+          [entry.id, entry.systolic, entry.diastolic, entry.pulse, entry.notes ?? '', entry.recordedAt]
+        )
+      }
+
+      for (const entry of backup.foodLogs ?? []) {
+        await client.query(
+          `
+            INSERT INTO food_logs (id, food_name, serving_size, sodium_mg, meal_type, barcode, logged_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `,
+          [entry.id, entry.foodName, entry.servingSize, entry.sodiumMg, entry.mealType, entry.barcode ?? '', entry.loggedAt]
+        )
+      }
+
+      for (const entry of backup.medicationLogs ?? []) {
+        await client.query(
+          `
+            INSERT INTO medication_logs (id, medication_name, dosage, taken_at, notes)
+            VALUES ($1, $2, $3, $4, $5)
+          `,
+          [entry.id, entry.medicationName, entry.dosage, entry.takenAt, entry.notes ?? '']
+        )
+      }
+
+      for (const entry of backup.reminders ?? []) {
+        await client.query(
+          `
+            INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `,
+          [entry.id, entry.title, entry.reminderType, entry.timeOfDay, entry.enabled !== false, entry.medicationName ?? '', entry.notes ?? '']
+        )
+      }
+
+      for (const entry of backup.goalBadges ?? []) {
+        await client.query(
+          `
+            INSERT INTO goal_badges (date_key, steps, sodium_total_mg, sodium_goal_mg, created_at)
+            VALUES ($1, $2, $3, $4, COALESCE($5, NOW()))
+          `,
+          [entry.date, entry.steps, entry.sodiumTotalMg, entry.sodiumGoalMg, entry.createdAt ?? null]
+        )
+      }
+
+      const fitbit = createBackupSafeFitbitState(backup.fitbit)
+      await client.query(
+        `
+          INSERT INTO fitbit_connection (
+            id, access_token, refresh_token, expires_at, scope, fitbit_user_id, profile_name, summary_json, updated_at
+          )
+          VALUES (1, $1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+          ON CONFLICT (id)
+          DO UPDATE SET
+            access_token = EXCLUDED.access_token,
+            refresh_token = EXCLUDED.refresh_token,
+            expires_at = EXCLUDED.expires_at,
+            scope = EXCLUDED.scope,
+            fitbit_user_id = EXCLUDED.fitbit_user_id,
+            profile_name = EXCLUDED.profile_name,
+            summary_json = EXCLUDED.summary_json,
+            updated_at = NOW()
+        `,
+        [
+          fitbit.connection?.accessToken ?? null,
+          fitbit.connection?.refreshToken ?? null,
+          fitbit.connection?.expiresAt ?? null,
+          fitbit.connection?.scope ?? '',
+          fitbit.connection?.fitbitUserId ?? '',
+          fitbit.connection?.profileName ?? '',
+          JSON.stringify(fitbit.summary ?? null),
+        ]
+      )
+
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+
+    return this.getBackupData()
   }
 
   async saveFitbitState(nextState) {

@@ -150,6 +150,26 @@ function createSeedData() {
         loggedAt: withTime(daysAgo(6), 16, 50),
       },
     ],
+    medicationLogs: [
+      {
+        id: 'med-1',
+        medicationName: 'Lisinopril',
+        dosage: '10 mg',
+        takenAt: withTime(daysAgo(0), 8, 0),
+        notes: 'Morning dose',
+      },
+    ],
+    reminders: [
+      {
+        id: 'reminder-1',
+        title: 'Take blood pressure medicine',
+        reminderType: 'medication',
+        timeOfDay: '08:00',
+        enabled: true,
+        medicationName: 'Lisinopril',
+        notes: 'Morning reminder',
+      },
+    ],
     goalBadges: [],
   }
 }

@@ -45,6 +45,24 @@ CREATE TABLE IF NOT EXISTS goal_badges (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS medication_logs (
+  id UUID PRIMARY KEY,
+  medication_name TEXT NOT NULL,
+  dosage TEXT NOT NULL,
+  taken_at TIMESTAMPTZ NOT NULL,
+  notes TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS reminders (
+  id UUID PRIMARY KEY,
+  title TEXT NOT NULL,
+  reminder_type TEXT NOT NULL,
+  time_of_day TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  medication_name TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT ''
+);
+
 INSERT INTO app_settings (id, sodium_goal_mg)
 VALUES (1, 2300)
 ON CONFLICT (id) DO NOTHING;
