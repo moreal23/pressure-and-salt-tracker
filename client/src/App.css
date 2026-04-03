@@ -548,6 +548,44 @@ textarea {
   margin-bottom: 16px;
 }
 
+.camera-help {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(22, 48, 47, 0.08);
+}
+
+.camera-help strong {
+  color: #16302f;
+}
+
+.camera-help__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.camera-help__card {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(15, 108, 97, 0.07);
+}
+
+.camera-help__card span {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 700;
+  color: #0f6c61;
+}
+
+.camera-help__card p {
+  margin: 0;
+  color: #435856;
+}
+
 .manual-lookup {
   margin-top: 16px;
   display: grid;
@@ -939,7 +977,8 @@ textarea {
   .food-check,
   .fitbit-summary,
   .badge-grid,
-  .summary-grid--badges {
+  .summary-grid--badges,
+  .camera-help__grid {
     grid-template-columns: 1fr;
   }
 

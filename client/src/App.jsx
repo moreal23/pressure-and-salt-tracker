@@ -577,6 +577,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
   const [manualBarcode, setManualBarcode] = useState('')
   const [scannerReady, setScannerReady] = useState(false)
   const [fileScanBusy, setFileScanBusy] = useState(false)
+  const [showCameraHelp, setShowCameraHelp] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -769,7 +770,34 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
         >
           Stop camera
         </button>
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={() => setShowCameraHelp((current) => !current)}
+        >
+          {showCameraHelp ? 'Hide camera help' : 'Fix camera access'}
+        </button>
       </div>
+
+      {showCameraHelp ? (
+        <div className="camera-help">
+          <strong>Try these steps</strong>
+          <div className="camera-help__grid">
+            <article className="camera-help__card">
+              <span>iPhone</span>
+              <p>Open the site in Safari, tap the `aA` or site icon, then allow Camera and reload the page.</p>
+            </article>
+            <article className="camera-help__card">
+              <span>Android</span>
+              <p>Open the site in Chrome, tap the lock or settings icon by the address bar, allow Camera, then refresh.</p>
+            </article>
+            <article className="camera-help__card">
+              <span>If it still fails</span>
+              <p>Close the old tab, reopen the live website link, or use `Scan from photo` to upload a barcode image instead.</p>
+            </article>
+          </div>
+        </div>
+      ) : null}
 
       <div className="file-scan">
         <label htmlFor="barcodePhoto">Scan from photo</label>
