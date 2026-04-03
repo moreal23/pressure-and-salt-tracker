@@ -115,6 +115,30 @@ function mergeFitbitSummary(previousSummary, nextSummary) {
   }
 }
 
+function mergeFitbitHistory(previousHistory = [], summary) {
+  if (!summary?.lastSyncAt) {
+    return [...(previousHistory ?? [])]
+      .filter(Boolean)
+      .sort((left, right) => left.date.localeCompare(right.date))
+      .slice(-14)
+  }
+
+  const date = summary.lastSyncAt.slice(0, 10)
+  const nextHistory = (previousHistory ?? []).filter((entry) => entry?.date !== date)
+
+  nextHistory.push({
+    date,
+    stepsToday: Number(summary.stepsToday ?? 0),
+    restingHeartRate: summary.restingHeartRate ?? null,
+    latestHeartRate: summary.latestHeartRate ?? null,
+    sleepMinutes: Number(summary.sleepMinutes ?? 0),
+    weightValue: summary.weightValue ?? null,
+    lastSyncAt: summary.lastSyncAt,
+  })
+
+  return nextHistory.sort((left, right) => left.date.localeCompare(right.date)).slice(-14)
+}
+
 async function fetchFitbitSummary(accessToken, timeZone) {
   const today = getDateForTimeZone(timeZone)
   const [profile, steps, heart, sleep, weight] = await Promise.all([
@@ -187,6 +211,7 @@ export async function syncFitbitData(store, config) {
     fitbitState.summary,
     await fetchFitbitSummary(fitbitState.connection.accessToken, config.timeZone)
   )
+  const history = mergeFitbitHistory(fitbitState.history, summary)
 
   return store.saveFitbitState({
     connection: {
@@ -194,11 +219,12 @@ export async function syncFitbitData(store, config) {
       profileName: summary.profileName || fitbitState.connection.profileName || '',
     },
     summary,
+    history,
     pendingAuthState: '',
   })
 }
 
-export async function syncFitbitIfStale(store, config, maxAgeMs = 15 * 60 * 1000) {
+export async function syncFitbitIfStale(store, config, maxAgeMs = 5 * 60 * 1000) {
   const fitbitState = await store.getFitbitState()
 
   if (!fitbitState.connection?.accessToken) {

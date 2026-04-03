@@ -309,6 +309,73 @@ function buildRecentFoodChoices(foodLogs) {
   return choices
 }
 
+function formatRelativeTime(value) {
+  if (!value) {
+    return 'Waiting for an update'
+  }
+
+  const deltaMs = Date.now() - new Date(value).getTime()
+
+  if (!Number.isFinite(deltaMs)) {
+    return 'Waiting for an update'
+  }
+
+  const deltaMinutes = Math.max(0, Math.round(deltaMs / 60_000))
+
+  if (deltaMinutes < 1) {
+    return 'Updated just now'
+  }
+
+  if (deltaMinutes === 1) {
+    return 'Updated 1 minute ago'
+  }
+
+  if (deltaMinutes < 60) {
+    return `Updated ${deltaMinutes} minutes ago`
+  }
+
+  const deltaHours = Math.round(deltaMinutes / 60)
+  if (deltaHours === 1) {
+    return 'Updated 1 hour ago'
+  }
+
+  if (deltaHours < 24) {
+    return `Updated ${deltaHours} hours ago`
+  }
+
+  return `Updated ${Math.round(deltaHours / 24)} days ago`
+}
+
+function buildFitbitChartData(history = [], summary = null) {
+  const nextHistory = [...(history ?? [])]
+
+  if (summary?.lastSyncAt) {
+    const todayKey = getLocalDayKey(summary.lastSyncAt)
+    const todayEntry = {
+      date: todayKey,
+      stepsToday: Number(summary.stepsToday ?? 0),
+      restingHeartRate: summary.restingHeartRate ?? null,
+      latestHeartRate: summary.latestHeartRate ?? null,
+      sleepMinutes: Number(summary.sleepMinutes ?? 0),
+      weightValue: summary.weightValue ?? null,
+      lastSyncAt: summary.lastSyncAt,
+    }
+    const withoutToday = nextHistory.filter((entry) => entry.date !== todayKey)
+    withoutToday.push(todayEntry)
+    nextHistory.splice(0, nextHistory.length, ...withoutToday)
+  }
+
+  return nextHistory
+    .filter(Boolean)
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-7)
+    .map((entry) => ({
+      ...entry,
+      label: formatDay(entry.date),
+      heartRate: entry.latestHeartRate ?? entry.restingHeartRate ?? null,
+    }))
+}
+
 function buildWeeklyMedicationSummary(reminders, medicationLogs, now = new Date()) {
   const medicationReminders = reminders
     .filter((entry) => entry.enabled && entry.reminderType === 'medication')
@@ -1731,7 +1798,7 @@ function FitbitPanel({ fitbit, busy, onConnect, onSync, onDisconnect }) {
               <strong>
                 {fitbit.summary?.lastSyncAt ? formatDateTime(fitbit.summary.lastSyncAt) : '--'}
               </strong>
-              <small>Manual sync keeps data current</small>
+              <small>Background sync now refreshes Fitbit automatically</small>
             </div>
           </div>
         </div>
@@ -1758,11 +1825,28 @@ function FitbitPanel({ fitbit, busy, onConnect, onSync, onDisconnect }) {
   )
 }
 
+function SyncStatusBar({ items }) {
+  return (
+    <section className="sync-status-bar">
+      {items.map((item) => (
+        <article key={item.label} className="sync-status-card">
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+          <small>{item.detail}</small>
+        </article>
+      ))}
+    </section>
+  )
+}
+
 function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
   const scannerNodeRef = useRef(null)
   const scannerInstanceRef = useRef(null)
   const fileInputRef = useRef(null)
   const [manualBarcode, setManualBarcode] = useState('')
+  const [foodSearchTerm, setFoodSearchTerm] = useState('')
+  const [foodSearchBusy, setFoodSearchBusy] = useState(false)
+  const [foodSearchResults, setFoodSearchResults] = useState([])
   const [scannerReady, setScannerReady] = useState(false)
   const [fileScanBusy, setFileScanBusy] = useState(false)
   const [showCameraHelp, setShowCameraHelp] = useState(false)
@@ -1817,6 +1901,45 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
         error: error.message,
         message: '',
       })
+    }
+  }
+
+  async function searchFoods() {
+    if (!foodSearchTerm.trim()) {
+      setLookupState({
+        loading: false,
+        error: 'Enter a food name to search.',
+        message: '',
+      })
+      setFoodSearchResults([])
+      return
+    }
+
+    setFoodSearchBusy(true)
+    setLookupState({
+      loading: false,
+      error: '',
+      message: 'Searching foods by name...',
+    })
+
+    try {
+      const query = encodeURIComponent(foodSearchTerm.trim())
+      const result = await fetchJson(`/api/food-search?q=${query}`)
+      setFoodSearchResults(result.items ?? [])
+      setLookupState({
+        loading: false,
+        error: '',
+        message: `Found ${result.items?.length ?? 0} food option(s). Pick one to load it into the form.`,
+      })
+    } catch (error) {
+      setFoodSearchResults([])
+      setLookupState({
+        loading: false,
+        error: error.message,
+        message: '',
+      })
+    } finally {
+      setFoodSearchBusy(false)
     }
   }
 
@@ -2076,6 +2199,54 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
         </div>
       </div>
 
+      <div className="manual-lookup">
+        <label htmlFor="foodSearch">Search food by name</label>
+        <div className="inline-form">
+          <input
+            id="foodSearch"
+            type="text"
+            placeholder="Example: low sodium soup"
+            value={foodSearchTerm}
+            onChange={(event) => setFoodSearchTerm(event.target.value)}
+          />
+          <button
+            className="button button--solid"
+            type="button"
+            onClick={searchFoods}
+            disabled={foodSearchBusy}
+          >
+            {foodSearchBusy ? 'Searching...' : 'Search foods'}
+          </button>
+        </div>
+      </div>
+
+      {foodSearchResults.length ? (
+        <div className="food-search-results">
+          {foodSearchResults.map((item) => (
+            <button
+              key={`${item.barcode || item.foodName}-${item.servingSize}`}
+              className="food-search-result"
+              type="button"
+              onClick={() => {
+                onLookupComplete(item)
+                setLookupState({
+                  loading: false,
+                  error: '',
+                  message: `Loaded ${item.foodName}. Review it below and save it to your day log.`,
+                })
+                setFoodSearchResults([])
+              }}
+            >
+              <strong>{item.foodName}</strong>
+              <span>
+                {item.servingSize} • {item.sodiumMg} mg sodium
+              </span>
+              <small>{item.barcode ? `Barcode ${item.barcode}` : 'Food name search result'}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {lookupState.message ? <p className="status status--ok">{lookupState.message}</p> : null}
       {lookupState.error ? <p className="status status--error">{lookupState.error}</p> : null}
     </section>
@@ -2104,6 +2275,7 @@ function App() {
     scopes: [],
     profileName: '',
     summary: null,
+    history: [],
   })
   const [status, setStatus] = useState({ loading: true, error: '' })
   const [bpForm, setBpForm] = useState({
@@ -2377,6 +2549,41 @@ function App() {
     [reminders, medicationLogs]
   )
   const recentFoods = useMemo(() => buildRecentFoodChoices(history.foodLogs), [history.foodLogs])
+  const fitbitChartData = useMemo(
+    () => buildFitbitChartData(fitbit.history, fitbit.summary),
+    [fitbit.history, fitbit.summary]
+  )
+  const syncStatusItems = useMemo(
+    () => [
+      {
+        label: 'Fitbit',
+        value: fitbit.connected ? formatRelativeTime(fitbit.summary?.lastSyncAt) : 'Not connected',
+        detail: fitbit.connected ? 'Background refresh checks every minute and updates within about 5 minutes.' : 'Connect Fitbit to track steps, heart rate, and sleep.',
+      },
+      {
+        label: 'Blood pressure',
+        value: formatRelativeTime(history.bloodPressureLogs[0]?.recordedAt),
+        detail: history.bloodPressureLogs[0]?.recordedAt
+          ? `Latest reading ${formatDateTime(history.bloodPressureLogs[0].recordedAt)}`
+          : 'No blood pressure reading saved yet.',
+      },
+      {
+        label: 'Food logs',
+        value: formatRelativeTime(history.foodLogs[0]?.loggedAt),
+        detail: history.foodLogs[0]?.loggedAt
+          ? `Latest food log ${formatDateTime(history.foodLogs[0].loggedAt)}`
+          : 'No food log saved yet.',
+      },
+      {
+        label: 'Medication',
+        value: formatRelativeTime(medicationLogs[0]?.takenAt),
+        detail: medicationLogs[0]?.takenAt
+          ? `Latest medicine log ${formatDateTime(medicationLogs[0].takenAt)}`
+          : 'No medication log saved yet.',
+      },
+    ],
+    [fitbit.connected, fitbit.summary?.lastSyncAt, history.bloodPressureLogs, history.foodLogs, medicationLogs]
+  )
   const favoriteKeys = useMemo(
     () => new Set(favoriteFoods.map((entry) => getFoodChoiceKey(entry))),
     [favoriteFoods]
@@ -2625,6 +2832,7 @@ function App() {
         connected: result.connected,
         profileName: result.profileName,
         summary: result.summary,
+        history: result.history ?? current.history ?? [],
       }))
       await loadDashboard({ silent: true, skipFitbitStartupSync: true })
 
@@ -2665,6 +2873,7 @@ function App() {
         connected: false,
         profileName: '',
         summary: null,
+        history: current.history ?? [],
       }))
       setSavingState('Fitbit disconnected.')
     } catch (error) {
@@ -3411,7 +3620,10 @@ function App() {
 
     if (item.source === 'favorite') {
       setSavingState(`Loaded ${item.foodName} from your saved favorite foods.`)
+      return
     }
+
+    setSavingState(`Loaded ${item.foodName}. Review it below and save it to your day log.`)
   }
 
   if (authState.checking || (authState.authenticated && status.loading)) {
@@ -3521,6 +3733,8 @@ function App() {
           </small>
         </section>
       </section>
+
+      <SyncStatusBar items={syncStatusItems} />
 
       <section className="summary-grid">
         <SummaryCard
@@ -4040,6 +4254,65 @@ function App() {
                 </LineChart>
               </ResponsiveContainer>
             </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Fitbit History</p>
+                <h2>Recent Fitbit trends</h2>
+              </div>
+              <p className="panel-copy">
+                Review the last several Fitbit updates for steps, heart rate, and sleep in one place.
+              </p>
+            </div>
+
+            <div className="chart-wrap">
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={fitbitChartData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="left" tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="right" orientation="right" tickLine={false} axisLine={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="stepsToday"
+                    name="Steps"
+                    stroke="#c65d36"
+                    strokeWidth={3}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="heartRate"
+                    name="Heart rate"
+                    stroke="#0f6c61"
+                    strokeWidth={3}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="sleepMinutes"
+                    name="Sleep (min)"
+                    stroke="#1c3f61"
+                    strokeWidth={3}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {fitbitChartData.length ? (
+              <div className="import-hint">
+                Fitbit history updates automatically in the background and keeps the latest 7 daily snapshots on this chart.
+              </div>
+            ) : (
+              <div className="import-hint">
+                Connect Fitbit and let it sync a few times to build your recent Fitbit trend chart.
+              </div>
+            )}
           </section>
 
           <section className="panel">

@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS fitbit_connection (
   fitbit_user_id TEXT NOT NULL DEFAULT '',
   profile_name TEXT NOT NULL DEFAULT '',
   summary_json JSONB,
+  history_json JSONB,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT single_fitbit_row CHECK (id = 1)
 );

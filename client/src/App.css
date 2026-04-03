@@ -362,6 +362,36 @@ body {
   margin-top: 24px;
 }
 
+.sync-status-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.sync-status-card {
+  padding: 16px 18px;
+  border-radius: 22px;
+  background: rgba(255, 250, 244, 0.82);
+  border: 1px solid rgba(22, 48, 47, 0.1);
+  box-shadow: 0 14px 40px rgba(71, 48, 28, 0.08);
+}
+
+.sync-status-card span {
+  color: #617572;
+}
+
+.sync-status-card strong {
+  display: block;
+  margin: 8px 0 6px;
+  font-size: 1.05rem;
+  color: #16302f;
+}
+
+.sync-status-card small {
+  color: #49615e;
+}
+
 .summary-grid--badges {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -620,6 +650,38 @@ textarea {
   margin-top: 16px;
   display: grid;
   gap: 8px;
+}
+
+.food-search-results {
+  margin-top: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.food-search-result {
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(22, 48, 47, 0.08);
+  background: rgba(255, 255, 255, 0.76);
+  color: #16302f;
+}
+
+.food-search-result strong,
+.food-search-result span,
+.food-search-result small {
+  display: block;
+}
+
+.food-search-result span {
+  margin-top: 6px;
+  color: #335a56;
+}
+
+.food-search-result small {
+  margin-top: 4px;
+  color: #617572;
 }
 
 .file-scan {
@@ -1207,7 +1269,8 @@ textarea {
 @media (max-width: 1040px) {
   .hero,
   .content-grid,
-  .summary-grid {
+  .summary-grid,
+  .sync-status-bar {
     grid-template-columns: 1fr;
   }
 }

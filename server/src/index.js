@@ -310,6 +310,30 @@ function mergeFitbitSummary(previousSummary, nextSummary) {
   }
 }
 
+function mergeFitbitHistory(previousHistory = [], summary) {
+  if (!summary?.lastSyncAt) {
+    return [...(previousHistory ?? [])]
+      .filter(Boolean)
+      .sort((left, right) => left.date.localeCompare(right.date))
+      .slice(-14)
+  }
+
+  const date = summary.lastSyncAt.slice(0, 10)
+  const nextHistory = (previousHistory ?? []).filter((entry) => entry?.date !== date)
+
+  nextHistory.push({
+    date,
+    stepsToday: Number(summary.stepsToday ?? 0),
+    restingHeartRate: summary.restingHeartRate ?? null,
+    latestHeartRate: summary.latestHeartRate ?? null,
+    sleepMinutes: Number(summary.sleepMinutes ?? 0),
+    weightValue: summary.weightValue ?? null,
+    lastSyncAt: summary.lastSyncAt,
+  })
+
+  return nextHistory.sort((left, right) => left.date.localeCompare(right.date)).slice(-14)
+}
+
 async function refreshFitbitConnectionIfNeeded(store) {
   const fitbitState = await store.getFitbitState()
   const connection = fitbitState.connection
@@ -383,6 +407,7 @@ async function syncFitbitData(store) {
     fitbitState.summary,
     await fetchFitbitSummary(fitbitState.connection.accessToken)
   )
+  const history = mergeFitbitHistory(fitbitState.history, summary)
 
   return store.saveFitbitState({
     connection: {
@@ -390,6 +415,7 @@ async function syncFitbitData(store) {
       profileName: summary.profileName || fitbitState.connection.profileName || '',
     },
     summary,
+    history,
   })
 }
 
@@ -652,6 +678,30 @@ function getBarcodeLookupCandidates(barcode) {
   return [...new Set(candidates)].filter(Boolean)
 }
 
+function mapOpenFoodFactsProduct(product, fallbackName = 'Scanned food') {
+  const nutriments = product?.nutriments ?? {}
+  const sodiumFromSalt =
+    parseNutrientToMg(nutriments.salt_serving, nutriments.salt_serving_unit) ??
+    parseNutrientToMg(nutriments.salt_value, nutriments.salt_unit) ??
+    parseNutrientToMg(nutriments.salt, nutriments.salt_unit)
+  const sodiumMg =
+    parseNutrientToMg(nutriments.sodium_serving, nutriments.sodium_serving_unit) ??
+    parseNutrientToMg(nutriments.sodium_value, nutriments.sodium_unit) ??
+    parseNutrientToMg(nutriments.sodium, nutriments.sodium_unit) ??
+    (sodiumFromSalt != null ? Math.round(sodiumFromSalt * 0.393) : null)
+
+  if (sodiumMg == null || Number.isNaN(sodiumMg)) {
+    return null
+  }
+
+  return {
+    barcode: String(product?.code ?? '').trim(),
+    foodName: product?.product_name || product?.generic_name || fallbackName,
+    servingSize: product?.serving_size || '1 serving',
+    sodiumMg: Math.round(sodiumMg),
+  }
+}
+
 async function lookupBarcode(barcode) {
   const fallbackItem = barcodeFallbacks[barcode]
   const candidates = getBarcodeLookupCandidates(barcode)
@@ -669,27 +719,15 @@ async function lookupBarcode(barcode) {
         continue
       }
 
-      const product = payload.product
-      const nutriments = product.nutriments ?? {}
-      const sodiumFromSalt =
-        parseNutrientToMg(nutriments.salt_serving, nutriments.salt_serving_unit) ??
-        parseNutrientToMg(nutriments.salt_value, nutriments.salt_unit) ??
-        parseNutrientToMg(nutriments.salt, nutriments.salt_unit)
-      const sodiumMg =
-        parseNutrientToMg(nutriments.sodium_serving, nutriments.sodium_serving_unit) ??
-        parseNutrientToMg(nutriments.sodium_value, nutriments.sodium_unit) ??
-        parseNutrientToMg(nutriments.sodium, nutriments.sodium_unit) ??
-        (sodiumFromSalt != null ? Math.round(sodiumFromSalt * 0.393) : null)
+      const item = mapOpenFoodFactsProduct(payload.product)
 
-      if (sodiumMg == null || Number.isNaN(sodiumMg)) {
+      if (!item) {
         throw new Error('The food was found, but sodium details were missing.')
       }
 
       return {
-        barcode: candidate,
-        foodName: product.product_name || product.generic_name || 'Scanned food',
-        servingSize: product.serving_size || '1 serving',
-        sodiumMg: Math.round(sodiumMg),
+        ...item,
+        barcode: item.barcode || candidate,
       }
     }
   } catch (error) {
@@ -711,6 +749,84 @@ async function lookupBarcode(barcode) {
   }
 
   throw new Error('Food not found for that barcode.')
+}
+
+async function searchFoodsByName(query) {
+  const normalizedQuery = String(query ?? '').trim()
+
+  if (normalizedQuery.length < 2) {
+    throw new Error('Enter at least 2 letters to search foods by name.')
+  }
+
+  const url = new URL('https://world.openfoodfacts.org/cgi/search.pl')
+  url.searchParams.set('search_terms', normalizedQuery)
+  url.searchParams.set('search_simple', '1')
+  url.searchParams.set('action', 'process')
+  url.searchParams.set('json', '1')
+  url.searchParams.set('page_size', '12')
+
+  const response = await fetch(url)
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error('The food search service is not available right now.')
+  }
+
+  const items = (payload.products ?? [])
+    .map((product) => mapOpenFoodFactsProduct(product, 'Food result'))
+    .filter(Boolean)
+    .sort((left, right) => left.sodiumMg - right.sodiumMg)
+    .slice(0, 8)
+
+  if (!items.length) {
+    throw new Error('No foods with sodium details were found for that search.')
+  }
+
+  return items
+}
+
+function buildLocalFoodSearchResults(query, favoriteFoods = [], foodLogs = []) {
+  const normalizedQuery = String(query ?? '').trim().toLowerCase()
+
+  if (!normalizedQuery) {
+    return []
+  }
+
+  const seen = new Set()
+  const localMatches = []
+  const candidates = [
+    ...favoriteFoods.map((entry) => ({ ...entry, source: 'favorite' })),
+    ...foodLogs.map((entry) => ({ ...entry, source: 'recent' })),
+  ]
+
+  for (const entry of candidates) {
+    const haystack = [entry.foodName, entry.servingSize, entry.barcode].join(' ').toLowerCase()
+
+    if (!haystack.includes(normalizedQuery)) {
+      continue
+    }
+
+    const key = [entry.foodName, entry.servingSize, entry.sodiumMg, entry.barcode].join('|').toLowerCase()
+
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    localMatches.push({
+      foodName: entry.foodName,
+      servingSize: entry.servingSize,
+      sodiumMg: Number(entry.sodiumMg),
+      barcode: entry.barcode ?? '',
+      source: entry.source,
+    })
+
+    if (localMatches.length === 8) {
+      break
+    }
+  }
+
+  return localMatches
 }
 
 app.get('/api/health', async (request, response) => {
@@ -1112,6 +1228,7 @@ app.get('/api/fitbit/status', async (request, response, next) => {
       scopes: fitbitConfig.scopes,
       profileName: fitbitState.connection?.profileName ?? '',
       summary: fitbitState.summary ?? null,
+      history: fitbitState.history ?? [],
     })
   } catch (error) {
     next(error)
@@ -1186,6 +1303,7 @@ app.post('/api/fitbit/sync', async (request, response, next) => {
       connected: Boolean(fitbitState.connection?.accessToken),
       profileName: fitbitState.connection?.profileName ?? '',
       summary: fitbitState.summary ?? null,
+      history: fitbitState.history ?? [],
     })
   } catch (error) {
     next(error)
@@ -1356,6 +1474,42 @@ app.get('/api/barcode/:barcode', async (request, response, next) => {
 
     const item = await lookupBarcode(barcode)
     response.json({ item })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/food-search', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const [favoriteFoods, foodLogs] = await Promise.all([store.getFavoriteFoods(), store.getFoodLogs()])
+    const localItems = buildLocalFoodSearchResults(request.query.q ?? '', favoriteFoods, foodLogs)
+    let remoteItems = []
+
+    try {
+      remoteItems = await searchFoodsByName(request.query.q ?? '')
+    } catch (error) {
+      if (!localItems.length) {
+        throw error
+      }
+    }
+
+    const items = [...localItems]
+    const seen = new Set(localItems.map((entry) => [entry.foodName, entry.servingSize, entry.sodiumMg, entry.barcode].join('|').toLowerCase()))
+
+    for (const entry of remoteItems) {
+      const key = [entry.foodName, entry.servingSize, entry.sodiumMg, entry.barcode].join('|').toLowerCase()
+      if (seen.has(key)) {
+        continue
+      }
+      seen.add(key)
+      items.push(entry)
+      if (items.length === 8) {
+        break
+      }
+    }
+
+    response.json({ items })
   } catch (error) {
     next(error)
   }

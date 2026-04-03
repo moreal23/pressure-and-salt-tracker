@@ -4,7 +4,36 @@ function createBackupSafeFitbitState(fitbitState) {
   return {
     connection: null,
     summary: fitbitState?.summary ?? null,
+    history: fitbitState?.history ?? [],
   }
+}
+
+function normalizeFitbitHistory(history = []) {
+  return [...history]
+    .filter(Boolean)
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-14)
+}
+
+function mergeFitbitHistory(history = [], summary) {
+  if (!summary?.lastSyncAt) {
+    return normalizeFitbitHistory(history)
+  }
+
+  const date = toDayKey(summary.lastSyncAt)
+  const nextHistory = history.filter((entry) => entry.date !== date)
+
+  nextHistory.push({
+    date,
+    stepsToday: Number(summary.stepsToday ?? 0),
+    restingHeartRate: summary.restingHeartRate ?? null,
+    latestHeartRate: summary.latestHeartRate ?? null,
+    sleepMinutes: Number(summary.sleepMinutes ?? 0),
+    weightValue: summary.weightValue ?? null,
+    lastSyncAt: summary.lastSyncAt,
+  })
+
+  return normalizeFitbitHistory(nextHistory)
 }
 
 function toDayKey(value) {
@@ -90,6 +119,7 @@ class PostgresStore {
         fitbit_user_id TEXT NOT NULL DEFAULT '',
         profile_name TEXT NOT NULL DEFAULT '',
         summary_json JSONB,
+        history_json JSONB,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         CONSTRAINT single_fitbit_row CHECK (id = 1)
       );
@@ -137,6 +167,9 @@ class PostgresStore {
 
       ALTER TABLE app_settings
       ADD COLUMN IF NOT EXISTS privacy_pin_hash TEXT NOT NULL DEFAULT '';
+
+      ALTER TABLE fitbit_connection
+      ADD COLUMN IF NOT EXISTS history_json JSONB;
 
       CREATE TABLE IF NOT EXISTS reminder_deliveries (
         id UUID PRIMARY KEY,
@@ -451,7 +484,7 @@ class PostgresStore {
 
   async getFitbitState() {
     const result = await this.pool.query(
-      'SELECT access_token AS "accessToken", refresh_token AS "refreshToken", expires_at AS "expiresAt", scope, fitbit_user_id AS "fitbitUserId", profile_name AS "profileName", summary_json AS summary FROM fitbit_connection WHERE id = 1'
+      'SELECT access_token AS "accessToken", refresh_token AS "refreshToken", expires_at AS "expiresAt", scope, fitbit_user_id AS "fitbitUserId", profile_name AS "profileName", summary_json AS summary, history_json AS history FROM fitbit_connection WHERE id = 1'
     )
     const row = result.rows[0]
 
@@ -459,6 +492,7 @@ class PostgresStore {
       return {
         connection: null,
         summary: null,
+        history: [],
       }
     }
 
@@ -474,6 +508,7 @@ class PostgresStore {
           }
         : null,
       summary: row.summary ?? null,
+      history: normalizeFitbitHistory(row.history ?? []),
     }
   }
 
@@ -785,9 +820,9 @@ class PostgresStore {
       await client.query(
         `
           INSERT INTO fitbit_connection (
-            id, access_token, refresh_token, expires_at, scope, fitbit_user_id, profile_name, summary_json, updated_at
+            id, access_token, refresh_token, expires_at, scope, fitbit_user_id, profile_name, summary_json, history_json, updated_at
           )
-          VALUES (1, $1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+          VALUES (1, $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, NOW())
           ON CONFLICT (id)
           DO UPDATE SET
             access_token = EXCLUDED.access_token,
@@ -797,6 +832,7 @@ class PostgresStore {
             fitbit_user_id = EXCLUDED.fitbit_user_id,
             profile_name = EXCLUDED.profile_name,
             summary_json = EXCLUDED.summary_json,
+            history_json = EXCLUDED.history_json,
             updated_at = NOW()
         `,
         [
@@ -807,6 +843,7 @@ class PostgresStore {
           fitbit.connection?.fitbitUserId ?? '',
           fitbit.connection?.profileName ?? '',
           JSON.stringify(fitbit.summary ?? null),
+          JSON.stringify(fitbit.history ?? []),
         ]
       )
 
@@ -829,7 +866,13 @@ class PostgresStore {
   async saveFitbitState(nextState) {
     const current = await this.getFitbitState()
     const connection = nextState.connection ?? current.connection
-    const summary = nextState.summary ?? current.summary
+    const hasSummary = Object.prototype.hasOwnProperty.call(nextState, 'summary')
+    const summary = hasSummary ? nextState.summary : current.summary
+    const history = Object.prototype.hasOwnProperty.call(nextState, 'history')
+      ? normalizeFitbitHistory(nextState.history)
+      : hasSummary
+        ? mergeFitbitHistory(current.history, summary)
+        : current.history
 
     await this.pool.query(
       `
@@ -842,9 +885,10 @@ class PostgresStore {
           fitbit_user_id,
           profile_name,
           summary_json,
+          history_json,
           updated_at
         )
-        VALUES (1, $1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+        VALUES (1, $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, NOW())
         ON CONFLICT (id)
         DO UPDATE SET
           access_token = EXCLUDED.access_token,
@@ -854,6 +898,7 @@ class PostgresStore {
           fitbit_user_id = EXCLUDED.fitbit_user_id,
           profile_name = EXCLUDED.profile_name,
           summary_json = EXCLUDED.summary_json,
+          history_json = EXCLUDED.history_json,
           updated_at = NOW()
       `,
       [
@@ -864,12 +909,14 @@ class PostgresStore {
         connection?.fitbitUserId ?? '',
         connection?.profileName ?? '',
         JSON.stringify(summary ?? null),
+        JSON.stringify(history),
       ]
     )
 
     return {
       connection,
       summary,
+      history,
     }
   }
 
@@ -885,9 +932,10 @@ class PostgresStore {
           fitbit_user_id,
           profile_name,
           summary_json,
+          history_json,
           updated_at
         )
-        VALUES (1, NULL, NULL, NULL, '', '', '', NULL, NOW())
+        VALUES (1, NULL, NULL, NULL, '', '', '', NULL, COALESCE((SELECT history_json FROM fitbit_connection WHERE id = 1), '[]'::jsonb), NOW())
         ON CONFLICT (id)
         DO UPDATE SET
           access_token = NULL,
@@ -897,6 +945,7 @@ class PostgresStore {
           fitbit_user_id = '',
           profile_name = '',
           summary_json = NULL,
+          history_json = COALESCE(fitbit_connection.history_json, '[]'::jsonb),
           updated_at = NOW()
       `
     )

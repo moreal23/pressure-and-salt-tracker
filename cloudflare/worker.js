@@ -25,6 +25,7 @@ import {
   parseReminderPayload,
   parseSettingsPayload,
   readJson,
+  searchFoodsByName,
   toIsoString,
 } from './shared.js'
 
@@ -241,6 +242,50 @@ async function syncScheduledFitbitData(env) {
   } catch (error) {
     console.error('Scheduled Fitbit sync failed:', error)
   }
+}
+
+function buildLocalFoodSearchResults(query, favoriteFoods = [], foodLogs = []) {
+  const normalizedQuery = String(query ?? '').trim().toLowerCase()
+
+  if (!normalizedQuery) {
+    return []
+  }
+
+  const seen = new Set()
+  const localMatches = []
+  const candidates = [
+    ...favoriteFoods.map((entry) => ({ ...entry, source: 'favorite' })),
+    ...foodLogs.map((entry) => ({ ...entry, source: 'recent' })),
+  ]
+
+  for (const entry of candidates) {
+    const haystack = [entry.foodName, entry.servingSize, entry.barcode].join(' ').toLowerCase()
+
+    if (!haystack.includes(normalizedQuery)) {
+      continue
+    }
+
+    const key = [entry.foodName, entry.servingSize, entry.sodiumMg, entry.barcode].join('|').toLowerCase()
+
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    localMatches.push({
+      foodName: entry.foodName,
+      servingSize: entry.servingSize,
+      sodiumMg: Number(entry.sodiumMg),
+      barcode: entry.barcode ?? '',
+      source: entry.source,
+    })
+
+    if (localMatches.length === 8) {
+      break
+    }
+  }
+
+  return localMatches
 }
 
 async function handleApiRequest(request, env) {
@@ -544,6 +589,7 @@ async function handleApiRequest(request, env) {
       scopes: fitbitConfig.scopes,
       profileName: fitbitState.connection?.profileName ?? '',
       summary: fitbitState.summary ?? null,
+      history: fitbitState.history ?? [],
     })
   }
 
@@ -619,6 +665,7 @@ async function handleApiRequest(request, env) {
       connected: Boolean(fitbitState.connection?.accessToken),
       profileName: fitbitState.connection?.profileName ?? '',
       summary: fitbitState.summary ?? null,
+      history: fitbitState.history ?? [],
     })
   }
 
@@ -751,6 +798,41 @@ async function handleApiRequest(request, env) {
 
     const item = await lookupBarcode(barcode)
     return jsonResponse({ item })
+  }
+
+  if (pathname === '/api/food-search' && method === 'GET') {
+    const query = url.searchParams.get('q') ?? ''
+    const localItems = buildLocalFoodSearchResults(
+      query,
+      await store.getFavoriteFoods(),
+      await store.getFoodLogs()
+    )
+    let remoteItems = []
+
+    try {
+      remoteItems = await searchFoodsByName(query)
+    } catch (error) {
+      if (!localItems.length) {
+        throw error
+      }
+    }
+
+    const items = [...localItems]
+    const seen = new Set(localItems.map((entry) => [entry.foodName, entry.servingSize, entry.sodiumMg, entry.barcode].join('|').toLowerCase()))
+
+    for (const entry of remoteItems) {
+      const key = [entry.foodName, entry.servingSize, entry.sodiumMg, entry.barcode].join('|').toLowerCase()
+      if (seen.has(key)) {
+        continue
+      }
+      seen.add(key)
+      items.push(entry)
+      if (items.length === 8) {
+        break
+      }
+    }
+
+    return jsonResponse({ items })
   }
 
   return errorResponse('Route not found.', 404)

@@ -9,8 +9,37 @@ function createBackupSafeFitbitState(fitbitState) {
   return {
     connection: null,
     summary: fitbitState?.summary ?? null,
+    history: fitbitState?.history ?? [],
     pendingAuthState: '',
   }
+}
+
+function normalizeFitbitHistory(history = []) {
+  return [...history]
+    .filter(Boolean)
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-14)
+}
+
+function mergeFitbitHistory(history = [], summary) {
+  if (!summary?.lastSyncAt) {
+    return normalizeFitbitHistory(history)
+  }
+
+  const date = toDayKey(summary.lastSyncAt)
+  const nextHistory = history.filter((entry) => entry.date !== date)
+
+  nextHistory.push({
+    date,
+    stepsToday: Number(summary.stepsToday ?? 0),
+    restingHeartRate: summary.restingHeartRate ?? null,
+    latestHeartRate: summary.latestHeartRate ?? null,
+    sleepMinutes: Number(summary.sleepMinutes ?? 0),
+    weightValue: summary.weightValue ?? null,
+    lastSyncAt: summary.lastSyncAt,
+  })
+
+  return normalizeFitbitHistory(nextHistory)
 }
 
 function toDayKey(value) {
@@ -321,6 +350,7 @@ class JsonStore {
     return data.fitbit ?? {
       connection: null,
       summary: null,
+      history: [],
     }
   }
 
@@ -480,11 +510,27 @@ class JsonStore {
 
   async saveFitbitState(nextState) {
     const data = await this.readData()
+    const current = data.fitbit ?? {
+      connection: null,
+      summary: null,
+      history: [],
+      pendingAuthState: '',
+    }
+    const summary = Object.prototype.hasOwnProperty.call(nextState, 'summary') ? nextState.summary : current.summary
+    const history = Object.prototype.hasOwnProperty.call(nextState, 'history')
+      ? normalizeFitbitHistory(nextState.history)
+      : Object.prototype.hasOwnProperty.call(nextState, 'summary')
+        ? mergeFitbitHistory(current.history, summary)
+        : current.history
+
     data.fitbit = {
       connection: null,
       summary: null,
-      ...(data.fitbit ?? {}),
+      history: [],
+      ...current,
       ...nextState,
+      summary,
+      history,
     }
     await this.writeData(data)
     return data.fitbit
@@ -495,6 +541,7 @@ class JsonStore {
     data.fitbit = {
       connection: null,
       summary: null,
+      history: data.fitbit?.history ?? [],
     }
     await this.writeData(data)
     return data.fitbit

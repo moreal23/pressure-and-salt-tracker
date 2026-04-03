@@ -4,8 +4,37 @@ function createBackupSafeFitbitState(fitbitState) {
   return {
     connection: null,
     summary: fitbitState?.summary ?? null,
+    history: fitbitState?.history ?? [],
     pendingAuthState: '',
   }
+}
+
+function normalizeFitbitHistory(history = []) {
+  return [...history]
+    .filter(Boolean)
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-14)
+}
+
+function mergeFitbitHistory(history = [], summary) {
+  if (!summary?.lastSyncAt) {
+    return normalizeFitbitHistory(history)
+  }
+
+  const date = toDayKey(summary.lastSyncAt)
+  const nextHistory = history.filter((entry) => entry.date !== date)
+
+  nextHistory.push({
+    date,
+    stepsToday: Number(summary.stepsToday ?? 0),
+    restingHeartRate: summary.restingHeartRate ?? null,
+    latestHeartRate: summary.latestHeartRate ?? null,
+    sleepMinutes: Number(summary.sleepMinutes ?? 0),
+    weightValue: summary.weightValue ?? null,
+    lastSyncAt: summary.lastSyncAt,
+  })
+
+  return normalizeFitbitHistory(nextHistory)
 }
 
 function getCurrentWeekStart() {
@@ -32,6 +61,12 @@ export class D1Store {
   async ensureSetup() {
     try {
       await this.db.prepare("ALTER TABLE app_settings ADD COLUMN privacy_pin_hash TEXT NOT NULL DEFAULT ''").run()
+    } catch {
+      // The column already exists on upgraded databases.
+    }
+
+    try {
+      await this.db.prepare("ALTER TABLE fitbit_connection ADD COLUMN history_json TEXT").run()
     } catch {
       // The column already exists on upgraded databases.
     }
@@ -538,6 +573,7 @@ export class D1Store {
             fitbit_user_id AS fitbitUserId,
             profile_name AS profileName,
             summary_json AS summaryJson,
+            history_json AS historyJson,
             pending_auth_state AS pendingAuthState
           FROM fitbit_connection
           WHERE id = 1
@@ -547,6 +583,7 @@ export class D1Store {
 
     const summary = row?.summaryJson ? JSON.parse(row.summaryJson) : null
     const hasConnection = Boolean(row?.accessToken)
+    const history = row?.historyJson ? normalizeFitbitHistory(JSON.parse(row.historyJson)) : []
 
     return {
       connection: hasConnection
@@ -560,6 +597,7 @@ export class D1Store {
           }
         : null,
       summary,
+      history,
       pendingAuthState: row?.pendingAuthState ?? '',
     }
   }
@@ -904,6 +942,11 @@ export class D1Store {
     const summary = Object.prototype.hasOwnProperty.call(nextState, 'summary')
       ? nextState.summary
       : current.summary
+    const history = Object.prototype.hasOwnProperty.call(nextState, 'history')
+      ? normalizeFitbitHistory(nextState.history)
+      : Object.prototype.hasOwnProperty.call(nextState, 'summary')
+        ? mergeFitbitHistory(current.history, summary)
+        : current.history
     const pendingAuthState = Object.prototype.hasOwnProperty.call(nextState, 'pendingAuthState')
       ? nextState.pendingAuthState
       : current.pendingAuthState
@@ -920,10 +963,11 @@ export class D1Store {
             fitbit_user_id,
             profile_name,
             summary_json,
+            history_json,
             pending_auth_state,
             updated_at
           )
-          VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(id)
           DO UPDATE SET
             access_token = excluded.access_token,
@@ -933,6 +977,7 @@ export class D1Store {
             fitbit_user_id = excluded.fitbit_user_id,
             profile_name = excluded.profile_name,
             summary_json = excluded.summary_json,
+            history_json = excluded.history_json,
             pending_auth_state = excluded.pending_auth_state,
             updated_at = CURRENT_TIMESTAMP
         `
@@ -945,6 +990,7 @@ export class D1Store {
         connection?.fitbitUserId ?? '',
         connection?.profileName ?? '',
         summary != null ? JSON.stringify(summary) : null,
+        JSON.stringify(history),
         pendingAuthState ?? ''
       )
       .run()
@@ -952,6 +998,7 @@ export class D1Store {
     return {
       connection,
       summary,
+      history,
       pendingAuthState,
     }
   }
