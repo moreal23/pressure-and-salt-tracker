@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pressure-and-salt-tracker",
+  "main": "./cloudflare/worker.js",
+  "compatibility_date": "2026-04-03",
+  "assets": {
+    "directory": "./client/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "FITBIT_SCOPES": "activity heartrate profile sleep weight"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pressure-and-salt-tracker",
+      "database_id": "bc7e349d-b92c-4d0e-a08a-23341884568c",
+      "preview_database_id": "bc7e349d-b92c-4d0e-a08a-23341884568c"
+    }
+  ]
+}

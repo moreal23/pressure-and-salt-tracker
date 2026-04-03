@@ -14,6 +14,7 @@ This folder is a real local test app you can run with `npm run dev` before deplo
 - Includes PWA files so it can be installed on supported phones after deployment
 - Includes a Fitbit OAuth integration panel for steps, heart rate, sleep, and weight
 - Uses PostgreSQL when configured, with a local JSON data file fallback for quick testing
+- Includes a Cloudflare Workers + D1 deployment path for one public website URL
 
 ## Folder Layout
 
@@ -38,6 +39,12 @@ This project is prepared for GitHub plus Render hosting:
 - `.gitignore` excludes local-only files and secrets
 - `render.yaml` defines a single Node web service
 - the Express server serves the built React app in production
+
+It is also prepared for Cloudflare Workers:
+
+- `wrangler.jsonc` defines the Worker, static asset routing, and D1 binding
+- `cloudflare/worker.js` handles the production API routes
+- `migrations/0001_initial.sql` creates the D1 tables
 
 For Render deployment, the health check path is:
 
@@ -71,6 +78,26 @@ That fallback is only for local testing. It helps you use the app immediately be
 4. Restart `npm run dev`
 
 Once configured, the app can connect to Fitbit and manually sync supported Fitbit data.
+
+## Cloudflare Workers Setup
+
+1. Run `npm install`
+2. Run `npm run cf:build`
+3. Sign into Cloudflare with `npx wrangler login`
+4. Create the D1 database with `npx wrangler d1 create pressure-and-salt-tracker`
+5. Copy the returned database id into `wrangler.jsonc`
+6. Apply the schema with `npm run cf:d1:migrate:remote`
+7. Deploy with `npm run cf:deploy`
+
+For a local Cloudflare-style preview after setup:
+
+- `npm run cf:dev`
+
+Important:
+
+- `npm run dev` still uses the local Node + Vite setup
+- the Cloudflare Worker uses D1 instead of the local JSON file
+- for deployed Fitbit support, set `FRONTEND_URL` and Fitbit secrets in Cloudflare before connecting
 
 ## Notes
 

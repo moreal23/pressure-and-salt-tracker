@@ -6,6 +6,11 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c green,cyan \"npm --prefix server run dev\" \"npm --prefix client run dev -- --host\"",
     "build": "npm --prefix client run build",
+    "cf:build": "npm --prefix client run build",
+    "cf:dev": "npm run cf:build && wrangler dev",
+    "cf:deploy": "npm run cf:build && wrangler deploy",
+    "cf:d1:migrate:local": "wrangler d1 migrations apply pressure-and-salt-tracker --local",
+    "cf:d1:migrate:remote": "wrangler d1 migrations apply pressure-and-salt-tracker --remote",
     "render-build": "npm --prefix client install && npm --prefix server install && npm --prefix client run build",
     "start": "npm --prefix server run start"
   },
@@ -19,6 +24,7 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "wrangler": "^4.13.2"
   }
 }
