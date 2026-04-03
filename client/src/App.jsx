@@ -1111,13 +1111,6 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
   const [scannerReady, setScannerReady] = useState(false)
   const [fileScanBusy, setFileScanBusy] = useState(false)
   const [showCameraHelp, setShowCameraHelp] = useState(false)
-  const [preferPhotoCapture, setPreferPhotoCapture] = useState(false)
-
-  useEffect(() => {
-    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches
-    const isPhoneLikeDevice = /android|iphone|ipad|ipod/i.test(window.navigator.userAgent)
-    setPreferPhotoCapture(isTouchDevice || isPhoneLikeDevice)
-  }, [])
 
   useEffect(() => {
     return () => {
@@ -1276,11 +1269,6 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
   }
 
   function handlePrimaryScanAction() {
-    if (preferPhotoCapture) {
-      fileInputRef.current?.click()
-      return
-    }
-
     startScanner()
   }
 
@@ -1292,15 +1280,21 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
           <h2>Scan packaged food with your camera</h2>
         </div>
         <p className="panel-copy">
-          {preferPhotoCapture
-            ? 'On phones, the main scan button opens your camera or photo picker, then the app reads the barcode from the photo and loads the food automatically.'
-            : 'On larger screens, the scanner opens inside the website so you can scan a barcode without leaving the page.'}
+          Open the live scanner to read a packaged food barcode right away. If live scanning does not work on your phone, you can still use the photo option below.
         </p>
       </div>
 
       <div className="scanner-actions">
         <button className="button button--solid" type="button" onClick={handlePrimaryScanAction}>
-          {preferPhotoCapture ? 'Take barcode photo' : 'Start camera scan'}
+          Start live barcode scan
+        </button>
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={fileScanBusy}
+        >
+          {fileScanBusy ? 'Reading photo...' : 'Take barcode photo'}
         </button>
         <button
           className="button button--ghost"
