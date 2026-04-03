@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: pressure-and-salt-tracker
+    env: node
+    rootDir: .
+    buildCommand: npm install && npm run render-build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: PGSSL
+        sync: false
+      - key: FITBIT_CLIENT_ID
+        sync: false
+      - key: FITBIT_CLIENT_SECRET
+        sync: false
+      - key: FITBIT_REDIRECT_URI
+        sync: false
+      - key: FITBIT_SCOPES
+        sync: false

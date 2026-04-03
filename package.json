@@ -1,0 +1,24 @@
+{
+  "name": "bp-sodium-tracker-test",
+  "version": "1.0.0",
+  "description": "Local test app for blood pressure and sodium tracking",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c green,cyan \"npm --prefix server run dev\" \"npm --prefix client run dev -- --host\"",
+    "build": "npm --prefix client run build",
+    "render-build": "npm --prefix client install && npm --prefix server install && npm --prefix client run build",
+    "start": "npm --prefix server run start"
+  },
+  "keywords": [
+    "health",
+    "blood-pressure",
+    "sodium",
+    "tracker"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

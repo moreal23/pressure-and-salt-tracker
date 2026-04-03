@@ -1,0 +1,340 @@
+const { Pool } = require('pg')
+
+function toDayKey(value) {
+  return new Date(value).toISOString().slice(0, 10)
+}
+
+function listLastSevenDays() {
+  const dates = []
+  const now = new Date()
+
+  for (let index = 6; index >= 0; index -= 1) {
+    const next = new Date(now)
+    next.setHours(0, 0, 0, 0)
+    next.setDate(now.getDate() - index)
+    dates.push(next)
+  }
+
+  return dates
+}
+
+class PostgresStore {
+  constructor(connectionString) {
+    this.storageMode = 'postgres'
+    this.pool = new Pool({
+      connectionString,
+      ssl: process.env.PGSSL === 'true' ? { rejectUnauthorized: false } : false,
+    })
+  }
+
+  async initialize() {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        sodium_goal_mg INTEGER NOT NULL DEFAULT 2300,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT single_settings_row CHECK (id = 1)
+      );
+
+      CREATE TABLE IF NOT EXISTS blood_pressure_logs (
+        id UUID PRIMARY KEY,
+        systolic INTEGER NOT NULL,
+        diastolic INTEGER NOT NULL,
+        pulse INTEGER NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        recorded_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS food_logs (
+        id UUID PRIMARY KEY,
+        food_name TEXT NOT NULL,
+        serving_size TEXT NOT NULL,
+        sodium_mg INTEGER NOT NULL,
+        meal_type TEXT NOT NULL DEFAULT 'Meal',
+        barcode TEXT NOT NULL DEFAULT '',
+        logged_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS fitbit_connection (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        access_token TEXT,
+        refresh_token TEXT,
+        expires_at TIMESTAMPTZ,
+        scope TEXT NOT NULL DEFAULT '',
+        fitbit_user_id TEXT NOT NULL DEFAULT '',
+        profile_name TEXT NOT NULL DEFAULT '',
+        summary_json JSONB,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT single_fitbit_row CHECK (id = 1)
+      );
+
+      INSERT INTO app_settings (id, sodium_goal_mg)
+      VALUES (1, 2300)
+      ON CONFLICT (id) DO NOTHING;
+    `)
+  }
+
+  async getSettings() {
+    const result = await this.pool.query('SELECT sodium_goal_mg FROM app_settings WHERE id = 1')
+    return {
+      sodiumGoalMg: result.rows[0]?.sodium_goal_mg ?? 2300,
+    }
+  }
+
+  async getDashboard() {
+    const settings = await this.getSettings()
+    const bpResult = await this.pool.query(
+      'SELECT id, systolic, diastolic, pulse, notes, recorded_at AS "recordedAt" FROM blood_pressure_logs ORDER BY recorded_at DESC'
+    )
+    const foodResult = await this.pool.query(
+      'SELECT id, food_name AS "foodName", serving_size AS "servingSize", sodium_mg AS "sodiumMg", meal_type AS "mealType", barcode, logged_at AS "loggedAt" FROM food_logs ORDER BY logged_at DESC'
+    )
+
+    const bloodPressureLogs = bpResult.rows
+    const foodLogs = foodResult.rows
+    const todayKey = toDayKey(new Date())
+    const todayFoods = foodLogs.filter((entry) => toDayKey(entry.loggedAt) === todayKey)
+    const todayReadings = bloodPressureLogs.filter((entry) => toDayKey(entry.recordedAt) === todayKey)
+    const sodiumTotalMg = todayFoods.reduce((sum, entry) => sum + entry.sodiumMg, 0)
+    const weeklyTrend = listLastSevenDays().map((date) => {
+      const key = toDayKey(date)
+      const foods = foodLogs.filter((entry) => toDayKey(entry.loggedAt) === key)
+      const readings = bloodPressureLogs.filter((entry) => toDayKey(entry.recordedAt) === key)
+
+      return {
+        date: key,
+        label: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        sodiumTotalMg: foods.reduce((sum, entry) => sum + entry.sodiumMg, 0),
+        averageSystolic: readings.length
+          ? Math.round(readings.reduce((sum, entry) => sum + entry.systolic, 0) / readings.length)
+          : 0,
+        averageDiastolic: readings.length
+          ? Math.round(readings.reduce((sum, entry) => sum + entry.diastolic, 0) / readings.length)
+          : 0,
+      }
+    })
+    const readingsForAverage = weeklyTrend.filter((entry) => entry.averageSystolic > 0)
+
+    return {
+      storageMode: this.storageMode,
+      settings,
+      latestBloodPressure: bloodPressureLogs[0] ?? null,
+      recentBloodPressure: bloodPressureLogs.slice(0, 5),
+      recentFoodLogs: foodLogs.slice(0, 6),
+      today: {
+        date: todayKey,
+        sodiumTotalMg,
+        sodiumRemainingMg: settings.sodiumGoalMg - sodiumTotalMg,
+        sodiumPercent: Math.round((sodiumTotalMg / settings.sodiumGoalMg) * 100),
+        bloodPressureCount: todayReadings.length,
+        foodCount: todayFoods.length,
+        scanCount: todayFoods.filter((entry) => entry.mealType === 'Scan' || entry.barcode).length,
+      },
+      weeklySummary: {
+        averageSystolic: readingsForAverage.length
+          ? Math.round(
+              readingsForAverage.reduce((sum, entry) => sum + entry.averageSystolic, 0) /
+                readingsForAverage.length
+            )
+          : 0,
+        averageDiastolic: readingsForAverage.length
+          ? Math.round(
+              readingsForAverage.reduce((sum, entry) => sum + entry.averageDiastolic, 0) /
+                readingsForAverage.length
+            )
+          : 0,
+        totalEntries: bloodPressureLogs.length + foodLogs.length,
+      },
+      weeklyTrend,
+    }
+  }
+
+  async updateSettings(nextSettings) {
+    const sodiumGoalMg = nextSettings.sodiumGoalMg
+
+    await this.pool.query(
+      `
+        INSERT INTO app_settings (id, sodium_goal_mg, updated_at)
+        VALUES (1, $1, NOW())
+        ON CONFLICT (id)
+        DO UPDATE SET sodium_goal_mg = EXCLUDED.sodium_goal_mg, updated_at = NOW()
+      `,
+      [sodiumGoalMg]
+    )
+
+    return {
+      sodiumGoalMg,
+    }
+  }
+
+  async getBloodPressureLogs() {
+    const result = await this.pool.query(
+      'SELECT id, systolic, diastolic, pulse, notes, recorded_at AS "recordedAt" FROM blood_pressure_logs ORDER BY recorded_at DESC'
+    )
+
+    return result.rows
+  }
+
+  async getFoodLogs() {
+    const result = await this.pool.query(
+      'SELECT id, food_name AS "foodName", serving_size AS "servingSize", sodium_mg AS "sodiumMg", meal_type AS "mealType", barcode, logged_at AS "loggedAt" FROM food_logs ORDER BY logged_at DESC'
+    )
+
+    return result.rows
+  }
+
+  async getFitbitState() {
+    const result = await this.pool.query(
+      'SELECT access_token AS "accessToken", refresh_token AS "refreshToken", expires_at AS "expiresAt", scope, fitbit_user_id AS "fitbitUserId", profile_name AS "profileName", summary_json AS summary FROM fitbit_connection WHERE id = 1'
+    )
+    const row = result.rows[0]
+
+    if (!row) {
+      return {
+        connection: null,
+        summary: null,
+      }
+    }
+
+    return {
+      connection: row.accessToken
+        ? {
+            accessToken: row.accessToken,
+            refreshToken: row.refreshToken,
+            expiresAt: row.expiresAt,
+            scope: row.scope,
+            fitbitUserId: row.fitbitUserId,
+            profileName: row.profileName,
+          }
+        : null,
+      summary: row.summary ?? null,
+    }
+  }
+
+  async saveFitbitState(nextState) {
+    const current = await this.getFitbitState()
+    const connection = nextState.connection ?? current.connection
+    const summary = nextState.summary ?? current.summary
+
+    await this.pool.query(
+      `
+        INSERT INTO fitbit_connection (
+          id,
+          access_token,
+          refresh_token,
+          expires_at,
+          scope,
+          fitbit_user_id,
+          profile_name,
+          summary_json,
+          updated_at
+        )
+        VALUES (1, $1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+        ON CONFLICT (id)
+        DO UPDATE SET
+          access_token = EXCLUDED.access_token,
+          refresh_token = EXCLUDED.refresh_token,
+          expires_at = EXCLUDED.expires_at,
+          scope = EXCLUDED.scope,
+          fitbit_user_id = EXCLUDED.fitbit_user_id,
+          profile_name = EXCLUDED.profile_name,
+          summary_json = EXCLUDED.summary_json,
+          updated_at = NOW()
+      `,
+      [
+        connection?.accessToken ?? null,
+        connection?.refreshToken ?? null,
+        connection?.expiresAt ?? null,
+        connection?.scope ?? '',
+        connection?.fitbitUserId ?? '',
+        connection?.profileName ?? '',
+        JSON.stringify(summary ?? null),
+      ]
+    )
+
+    return {
+      connection,
+      summary,
+    }
+  }
+
+  async clearFitbitState() {
+    await this.pool.query(
+      `
+        INSERT INTO fitbit_connection (
+          id,
+          access_token,
+          refresh_token,
+          expires_at,
+          scope,
+          fitbit_user_id,
+          profile_name,
+          summary_json,
+          updated_at
+        )
+        VALUES (1, NULL, NULL, NULL, '', '', '', NULL, NOW())
+        ON CONFLICT (id)
+        DO UPDATE SET
+          access_token = NULL,
+          refresh_token = NULL,
+          expires_at = NULL,
+          scope = '',
+          fitbit_user_id = '',
+          profile_name = '',
+          summary_json = NULL,
+          updated_at = NOW()
+      `
+    )
+
+    return {
+      connection: null,
+      summary: null,
+    }
+  }
+
+  async addBloodPressureLog(entry) {
+    await this.pool.query(
+      `
+        INSERT INTO blood_pressure_logs (id, systolic, diastolic, pulse, notes, recorded_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [entry.id, entry.systolic, entry.diastolic, entry.pulse, entry.notes, entry.recordedAt]
+    )
+
+    return entry
+  }
+
+  async deleteBloodPressureLog(id) {
+    const result = await this.pool.query('DELETE FROM blood_pressure_logs WHERE id = $1', [id])
+    return result.rowCount > 0
+  }
+
+  async addFoodLog(entry) {
+    await this.pool.query(
+      `
+        INSERT INTO food_logs (id, food_name, serving_size, sodium_mg, meal_type, barcode, logged_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `,
+      [
+        entry.id,
+        entry.foodName,
+        entry.servingSize,
+        entry.sodiumMg,
+        entry.mealType,
+        entry.barcode,
+        entry.loggedAt,
+      ]
+    )
+
+    return entry
+  }
+
+  async deleteFoodLog(id) {
+    const result = await this.pool.query('DELETE FROM food_logs WHERE id = $1', [id])
+    return result.rowCount > 0
+  }
+}
+
+module.exports = {
+  PostgresStore,
+}
