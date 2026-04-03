@@ -65,6 +65,10 @@ class JsonStore {
     if (!parsed.reminders) {
       parsed.reminders = []
     }
+    parsed.reminders = parsed.reminders.map((entry) => ({
+      dosage: '',
+      ...entry,
+    }))
     return parsed
   }
 
@@ -234,6 +238,7 @@ class JsonStore {
     const data = await this.readData()
     const nextEntry = {
       id: randomUUID(),
+      dosage: '',
       ...entry,
     }
     data.reminders.push(nextEntry)

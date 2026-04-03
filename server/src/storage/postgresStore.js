@@ -98,8 +98,12 @@ class PostgresStore {
         time_of_day TEXT NOT NULL,
         enabled BOOLEAN NOT NULL DEFAULT TRUE,
         medication_name TEXT NOT NULL DEFAULT '',
+        dosage TEXT NOT NULL DEFAULT '',
         notes TEXT NOT NULL DEFAULT ''
       );
+
+      ALTER TABLE reminders
+      ADD COLUMN IF NOT EXISTS dosage TEXT NOT NULL DEFAULT '';
 
       INSERT INTO app_settings (id, sodium_goal_mg)
       VALUES (1, 2300)
@@ -345,6 +349,7 @@ class PostgresStore {
           time_of_day AS "timeOfDay",
           enabled,
           medication_name AS "medicationName",
+          dosage,
           notes
         FROM reminders
         ORDER BY time_of_day ASC, title ASC
@@ -357,8 +362,8 @@ class PostgresStore {
   async addReminder(entry) {
     await this.pool.query(
       `
-        INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, dosage, notes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `,
       [
         entry.id,
@@ -367,6 +372,7 @@ class PostgresStore {
         entry.timeOfDay,
         entry.enabled,
         entry.medicationName,
+        entry.dosage,
         entry.notes,
       ]
     )
@@ -463,10 +469,19 @@ class PostgresStore {
       for (const entry of backup.reminders ?? []) {
         await client.query(
           `
-            INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, dosage, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
           `,
-          [entry.id, entry.title, entry.reminderType, entry.timeOfDay, entry.enabled !== false, entry.medicationName ?? '', entry.notes ?? '']
+          [
+            entry.id,
+            entry.title,
+            entry.reminderType,
+            entry.timeOfDay,
+            entry.enabled !== false,
+            entry.medicationName ?? '',
+            entry.dosage ?? '',
+            entry.notes ?? '',
+          ]
         )
       }
 

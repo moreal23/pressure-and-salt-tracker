@@ -167,6 +167,7 @@ function createSeedData() {
         timeOfDay: '08:00',
         enabled: true,
         medicationName: 'Lisinopril',
+        dosage: '10 mg',
         notes: 'Morning reminder',
       },
     ],

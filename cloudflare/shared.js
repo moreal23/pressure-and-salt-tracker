@@ -158,6 +158,7 @@ export function parseReminderPayload(body) {
     timeOfDay,
     enabled: body?.enabled !== false,
     medicationName: ensureString(body?.medicationName ?? '', 'Medication name', 0, 120),
+    dosage: ensureString(body?.dosage ?? '', 'Dosage', 0, 80),
     notes: ensureString(body?.notes ?? '', 'Notes', 0, 300),
   }
 }

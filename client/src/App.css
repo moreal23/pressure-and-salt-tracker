@@ -886,6 +886,28 @@ textarea {
   color: #435856;
 }
 
+.panel-subsection {
+  margin-top: 22px;
+}
+
+.panel-subsection h3 {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+}
+
+.daily-log-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.daily-log-card {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(22, 48, 47, 0.08);
+}
+
 .today-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -967,6 +989,13 @@ textarea {
 .history-main > div {
   display: grid;
   gap: 6px;
+}
+
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 10px;
 }
 
 .history-main strong {

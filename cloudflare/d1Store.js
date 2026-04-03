@@ -81,6 +81,7 @@ export class D1Store {
           time_of_day TEXT NOT NULL,
           enabled INTEGER NOT NULL DEFAULT 1,
           medication_name TEXT NOT NULL DEFAULT '',
+          dosage TEXT NOT NULL DEFAULT '',
           notes TEXT NOT NULL DEFAULT ''
         )
       `
@@ -392,6 +393,7 @@ export class D1Store {
             time_of_day AS timeOfDay,
             enabled,
             medication_name AS medicationName,
+            dosage,
             notes
           FROM reminders
           ORDER BY time_of_day ASC, title ASC
@@ -410,8 +412,8 @@ export class D1Store {
     await this.db
       .prepare(
         `
-          INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO reminders (id, title, reminder_type, time_of_day, enabled, medication_name, dosage, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `
       )
       .bind(
@@ -421,6 +423,7 @@ export class D1Store {
         entry.timeOfDay,
         entry.enabled ? 1 : 0,
         entry.medicationName,
+        entry.dosage,
         entry.notes
       )
       .run()
@@ -515,6 +518,7 @@ export class D1Store {
         timeOfDay: entry.timeOfDay,
         enabled: entry.enabled !== false,
         medicationName: entry.medicationName ?? '',
+        dosage: entry.dosage ?? '',
         notes: entry.notes ?? '',
       })
     }

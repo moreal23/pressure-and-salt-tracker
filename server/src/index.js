@@ -76,6 +76,7 @@ const reminderSchema = z.object({
   timeOfDay: z.string().regex(/^\d{2}:\d{2}$/),
   enabled: z.boolean().default(true),
   medicationName: z.string().max(120).default(''),
+  dosage: z.string().max(80).default(''),
   notes: z.string().max(300).default(''),
 })
 

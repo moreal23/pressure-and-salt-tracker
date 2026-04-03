@@ -13,6 +13,7 @@ This folder is a real local test app you can run with `npm run dev` before deplo
 - Includes a full history view for blood pressure and food entries
 - Includes a medication tracker with dosage, notes, and time taken
 - Includes daily reminders for medicine or check-ins while the app is open
+- Lets you tap a medication reminder to mark it taken and save a daily medication log
 - Includes trend insights across sodium, blood pressure, Fitbit steps, and medication logs
 - Can print a doctor-friendly report or export blood pressure and medication logs to CSV for Excel
 - Can export a full backup file and restore the app from that backup later

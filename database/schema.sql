@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   time_of_day TEXT NOT NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   medication_name TEXT NOT NULL DEFAULT '',
+  dosage TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT ''
 );
 

@@ -44,6 +44,7 @@ const emptyReminderForm = {
   reminderType: 'medication',
   timeOfDay: '08:00',
   medicationName: '',
+  dosage: '',
   notes: '',
 }
 
@@ -151,6 +152,72 @@ function formatDateOnly(value) {
     day: 'numeric',
     year: 'numeric',
   }).format(new Date(value))
+}
+
+function getLocalDayKey(value = new Date()) {
+  const date = new Date(value)
+  const offset = date.getTimezoneOffset()
+  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 10)
+}
+
+function formatTimeOfDay(value) {
+  if (!value) {
+    return ''
+  }
+
+  const [hourText = '0', minuteText = '00'] = String(value).split(':')
+  const date = new Date()
+  date.setHours(Number(hourText), Number(minuteText), 0, 0)
+
+  return new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function getReminderMedicationName(reminder) {
+  return reminder.medicationName?.trim() || reminder.title?.trim() || 'Medication'
+}
+
+function buildReminderMedicationNote(reminder) {
+  return `Taken from reminder: ${reminder.title} at ${reminder.timeOfDay}`
+}
+
+function findReminderMedicationLogToday(reminder, medicationLogs) {
+  const todayKey = getLocalDayKey()
+  const targetMedication = getReminderMedicationName(reminder).toLowerCase()
+  const targetNote = buildReminderMedicationNote(reminder)
+
+  return medicationLogs.find((entry) => {
+    if (getLocalDayKey(entry.takenAt) !== todayKey) {
+      return false
+    }
+
+    const medicationMatches = String(entry.medicationName ?? '').trim().toLowerCase() === targetMedication
+    const noteMatches = String(entry.notes ?? '').includes(targetNote)
+    return medicationMatches && noteMatches
+  })
+}
+
+function groupMedicationLogsByDay(medicationLogs) {
+  const groups = new Map()
+
+  for (const entry of medicationLogs) {
+    const dayKey = getLocalDayKey(entry.takenAt)
+
+    if (!groups.has(dayKey)) {
+      groups.set(dayKey, [])
+    }
+
+    groups.get(dayKey).push(entry)
+  }
+
+  return [...groups.entries()]
+    .sort((left, right) => right[0].localeCompare(left[0]))
+    .map(([dayKey, entries]) => ({
+      dayKey,
+      entries: [...entries].sort((left, right) => new Date(right.takenAt) - new Date(left.takenAt)),
+    }))
 }
 
 function escapeCsvCell(value) {
@@ -439,6 +506,8 @@ function MedicationPanel({
   onDelete,
   deletingId,
 }) {
+  const dailyGroups = groupMedicationLogsByDay(medicationLogs).slice(0, 7)
+
   return (
     <section className="panel">
       <div className="panel-heading">
@@ -498,39 +567,66 @@ function MedicationPanel({
         </button>
       </form>
 
-      <ul className="activity-list">
-        {medicationLogs.slice(0, 6).map((entry) => (
-          <li key={entry.id}>
-            <div className="history-main">
-              <div>
-                <strong>{entry.medicationName}</strong>
-                <span>{entry.dosage}</span>
+      <div className="panel-subsection">
+        <h3>Daily medication history</h3>
+        <p className="panel-copy">Your recent medicine check-ins are grouped by day so you can confirm you took them.</p>
+      </div>
+
+      {dailyGroups.length ? (
+        <div className="daily-log-list">
+          {dailyGroups.map((group) => (
+            <section key={group.dayKey} className="daily-log-card">
+              <div className="history-main">
+                <div>
+                  <strong>{formatDateOnly(group.dayKey)}</strong>
+                  <span>
+                    {group.entries.length} {group.entries.length === 1 ? 'dose logged' : 'doses logged'}
+                  </span>
+                </div>
               </div>
-              <button
-                className="button button--danger"
-                type="button"
-                onClick={() => onDelete(entry)}
-                disabled={deletingId === entry.id}
-              >
-                {deletingId === entry.id ? 'Deleting...' : 'Delete'}
-              </button>
-            </div>
-            <small>{formatDateTime(entry.takenAt)}</small>
-            {entry.notes ? <p>{entry.notes}</p> : null}
-          </li>
-        ))}
-      </ul>
+
+              <ul className="activity-list">
+                {group.entries.map((entry) => (
+                  <li key={entry.id}>
+                    <div className="history-main">
+                      <div>
+                        <strong>{entry.medicationName}</strong>
+                        <span>{entry.dosage}</span>
+                      </div>
+                      <button
+                        className="button button--danger"
+                        type="button"
+                        onClick={() => onDelete(entry)}
+                        disabled={deletingId === entry.id}
+                      >
+                        {deletingId === entry.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </div>
+                    <small>{formatDateTime(entry.takenAt)}</small>
+                    {entry.notes ? <p>{entry.notes}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className="import-hint">Your medication history will show up here once you log a dose.</div>
+      )}
     </section>
   )
 }
 
 function RemindersPanel({
   reminders,
+  medicationLogs,
   reminderForm,
   setReminderForm,
   notificationPermission,
   onEnableNotifications,
   onSubmit,
+  onLogTaken,
+  quickLogReminderId,
   onDelete,
   deletingId,
 }) {
@@ -541,7 +637,7 @@ function RemindersPanel({
           <p className="eyebrow">Reminders</p>
           <h2>Daily reminders</h2>
         </div>
-        <p className="panel-copy">Set medicine or check-in reminders that appear while the app is open.</p>
+        <p className="panel-copy">Set medicine or check-in reminders that appear while the app is open, then tap Mark taken for a one-click daily log.</p>
       </div>
 
       <div className="fitbit-actions">
@@ -596,6 +692,17 @@ function RemindersPanel({
             }
           />
         </label>
+        <label>
+          <span>Dosage</span>
+          <input
+            type="text"
+            value={reminderForm.dosage}
+            onChange={(event) =>
+              setReminderForm((current) => ({ ...current, dosage: event.target.value }))
+            }
+            placeholder="Example: 10 mg"
+          />
+        </label>
         <label className="full-width">
           <span>Notes</span>
           <textarea
@@ -613,25 +720,47 @@ function RemindersPanel({
 
       <ul className="activity-list">
         {reminders.map((entry) => (
-          <li key={entry.id}>
-            <div className="history-main">
-              <div>
-                <strong>{entry.title}</strong>
-                <span>{entry.timeOfDay}</span>
-              </div>
-              <button
-                className="button button--danger"
-                type="button"
-                onClick={() => onDelete(entry)}
-                disabled={deletingId === entry.id}
-              >
-                {deletingId === entry.id ? 'Deleting...' : 'Delete'}
-              </button>
-            </div>
-            <small>{entry.reminderType}</small>
-            {entry.medicationName ? <p>Medication: {entry.medicationName}</p> : null}
-            {entry.notes ? <p>{entry.notes}</p> : null}
-          </li>
+          (() => {
+            const todayLog = entry.reminderType === 'medication'
+              ? findReminderMedicationLogToday(entry, medicationLogs)
+              : null
+
+            return (
+              <li key={entry.id}>
+                <div className="history-main">
+                  <div>
+                    <strong>{entry.title}</strong>
+                    <span>{formatTimeOfDay(entry.timeOfDay)}</span>
+                  </div>
+                  <div className="history-actions">
+                    {entry.reminderType === 'medication' ? (
+                      <button
+                        className="button button--solid"
+                        type="button"
+                        onClick={() => onLogTaken(entry)}
+                        disabled={Boolean(todayLog) || quickLogReminderId === entry.id}
+                      >
+                        {quickLogReminderId === entry.id ? 'Saving...' : todayLog ? 'Taken today' : 'Mark taken'}
+                      </button>
+                    ) : null}
+                    <button
+                      className="button button--danger"
+                      type="button"
+                      onClick={() => onDelete(entry)}
+                      disabled={deletingId === entry.id}
+                    >
+                      {deletingId === entry.id ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </div>
+                </div>
+                <small>{entry.reminderType}</small>
+                {entry.medicationName ? <p>Medication: {entry.medicationName}</p> : null}
+                {entry.dosage ? <p>Dosage: {entry.dosage}</p> : null}
+                {todayLog ? <p>Logged today at {formatDateTime(todayLog.takenAt)}.</p> : null}
+                {entry.notes ? <p>{entry.notes}</p> : null}
+              </li>
+            )
+          })()
         ))}
       </ul>
     </section>
@@ -1309,6 +1438,7 @@ function App() {
   const [installMessage, setInstallMessage] = useState('')
   const [isInstalled, setIsInstalled] = useState(false)
   const [deletingId, setDeletingId] = useState('')
+  const [quickLogReminderId, setQuickLogReminderId] = useState('')
   const [fitbitBusy, setFitbitBusy] = useState(false)
   const [goalBadges, setGoalBadges] = useState([])
   const playedBadgeDatesRef = useRef(new Set())
@@ -1760,6 +1890,32 @@ function App() {
       setSavingState('Reminder saved.')
     } catch (error) {
       setSavingState(error.message)
+    }
+  }
+
+  async function handleReminderTaken(entry) {
+    const medicationName = getReminderMedicationName(entry)
+    const dosage = entry.dosage?.trim() || 'Taken'
+
+    setQuickLogReminderId(entry.id)
+    setSavingState(`Logging ${medicationName} for today...`)
+
+    try {
+      await fetchJson('/api/medications', {
+        method: 'POST',
+        body: JSON.stringify({
+          medicationName,
+          dosage,
+          takenAt: new Date().toISOString(),
+          notes: [buildReminderMedicationNote(entry), entry.notes?.trim()].filter(Boolean).join(' • '),
+        }),
+      })
+      await loadDashboard({ silent: true })
+      setSavingState(`${medicationName} logged for today.`)
+    } catch (error) {
+      setSavingState(error.message)
+    } finally {
+      setQuickLogReminderId('')
     }
   }
 
@@ -2625,11 +2781,14 @@ function App() {
 
           <RemindersPanel
             reminders={reminders}
+            medicationLogs={medicationLogs}
             reminderForm={reminderForm}
             setReminderForm={setReminderForm}
             notificationPermission={notificationPermission}
             onEnableNotifications={handleEnableNotifications}
             onSubmit={handleReminderSubmit}
+            onLogTaken={handleReminderTaken}
+            quickLogReminderId={quickLogReminderId}
             onDelete={handleDeleteReminder}
             deletingId={deletingId}
           />
