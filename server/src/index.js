@@ -52,6 +52,13 @@ const importSchema = z.object({
   rawText: z.string().min(8).max(100000),
 })
 
+const goalBadgeSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  steps: z.number().int().min(0).max(200000),
+  sodiumTotalMg: z.number().int().min(0).max(10000),
+  sodiumGoalMg: z.number().int().min(500).max(10000),
+})
+
 let storePromise = createStore()
 let fitbitAuthState = ''
 const clientDistPath = path.resolve(__dirname, '..', '..', 'client', 'dist')
@@ -552,6 +559,28 @@ app.get('/api/history', async (request, response, next) => {
       bloodPressureLogs,
       foodLogs,
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/celebrations', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    response.json({
+      goalBadges: await store.getGoalBadges(),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/celebrations/claim', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const badge = goalBadgeSchema.parse(request.body)
+    const result = await store.claimGoalBadge(badge)
+    response.status(result.created ? 201 : 200).json(result)
   } catch (error) {
     next(error)
   }

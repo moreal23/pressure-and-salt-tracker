@@ -153,6 +153,74 @@ async function fetchJson(path, options) {
   return body
 }
 
+async function playCelebrationSound() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+
+  if (!AudioContextClass) {
+    return
+  }
+
+  const audioContext = new AudioContextClass()
+
+  try {
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume()
+    }
+
+    const notes = [
+      { frequency: 523.25, duration: 0.14 },
+      { frequency: 659.25, duration: 0.14 },
+      { frequency: 783.99, duration: 0.18 },
+      { frequency: 1046.5, duration: 0.28 },
+    ]
+    let cursor = audioContext.currentTime
+
+    for (const note of notes) {
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+
+      oscillator.type = 'triangle'
+      oscillator.frequency.setValueAtTime(note.frequency, cursor)
+      gainNode.gain.setValueAtTime(0.0001, cursor)
+      gainNode.gain.exponentialRampToValueAtTime(0.18, cursor + 0.02)
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, cursor + note.duration)
+
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+      oscillator.start(cursor)
+      oscillator.stop(cursor + note.duration)
+
+      cursor += note.duration * 0.82
+    }
+
+    window.setTimeout(() => {
+      audioContext.close().catch(() => null)
+    }, 900)
+  } catch {
+    audioContext.close().catch(() => null)
+  }
+}
+
+function formatScannerError(error) {
+  const message = String(error?.message ?? error ?? '')
+
+  if (
+    /permission|denied|notallowederror|securityerror|permission dismissed|access denied/i.test(message)
+  ) {
+    return 'Camera permission was denied. Allow camera access for this site in your browser settings, or use Scan from photo below.'
+  }
+
+  if (/secure context|https|insecure/i.test(message)) {
+    return 'Camera scan needs a secure HTTPS page. Open the live website link and try again.'
+  }
+
+  if (/notfounderror|no camera/i.test(message)) {
+    return 'No camera was found on this device. You can still use Scan from photo below.'
+  }
+
+  return message || 'The camera could not start. You can still use Scan from photo below.'
+}
+
 function SummaryCard({ title, value, helper, tone = 'neutral' }) {
   return (
     <article className={`summary-card summary-card--${tone}`}>
@@ -160,6 +228,48 @@ function SummaryCard({ title, value, helper, tone = 'neutral' }) {
       <strong>{value}</strong>
       <small>{helper}</small>
     </article>
+  )
+}
+
+function GoalBadgesPanel({ goalBadges }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Badge Shelf</p>
+          <h2>Successful day badges</h2>
+        </div>
+        <p className="panel-copy">
+          Each gold badge marks a day when you reached 15,000 steps and stayed within your sodium goal.
+        </p>
+      </div>
+
+      <div className="badge-summary">
+        <strong>{goalBadges.length}</strong>
+        <span>{goalBadges.length === 1 ? 'gold badge earned' : 'gold badges earned'}</span>
+      </div>
+
+      {goalBadges.length ? (
+        <div className="badge-grid">
+          {goalBadges.slice(0, 12).map((badge) => (
+            <article key={badge.date} className="badge-card">
+              <div className="badge-medal" aria-hidden="true">
+                ★
+              </div>
+              <strong>{formatDay(badge.date)}</strong>
+              <small>{badge.steps.toLocaleString()} steps</small>
+              <small>
+                {badge.sodiumTotalMg.toLocaleString()} / {badge.sodiumGoalMg.toLocaleString()} mg
+              </small>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="import-hint">
+          Your first gold badge will appear here after you reach 15,000 steps and stay within your sodium goal for the day.
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -451,6 +561,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
   const scannerInstanceRef = useRef(null)
   const [manualBarcode, setManualBarcode] = useState('')
   const [scannerReady, setScannerReady] = useState(false)
+  const [fileScanBusy, setFileScanBusy] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -508,30 +619,42 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
         scannerInstanceRef.current = new Html5Qrcode(scannerNodeRef.current.id)
       }
 
-      const cameras = await Html5Qrcode.getCameras()
-
-      if (!cameras.length) {
-        throw new Error('No camera was found on this device.')
+      const config = {
+        fps: 10,
+        qrbox: { width: 240, height: 120 },
+        aspectRatio: 1.7777778,
+      }
+      const handleDecodedText = async (decodedText) => {
+        setManualBarcode(decodedText)
+        await scannerInstanceRef.current?.stop().catch(() => null)
+        await lookupBarcode(decodedText)
+        setScannerReady(false)
       }
 
-      const preferredCamera =
-        cameras.find((camera) => camera.label.toLowerCase().includes('back')) ?? cameras[0]
+      try {
+        await scannerInstanceRef.current.start(
+          { facingMode: 'environment' },
+          config,
+          handleDecodedText,
+          () => null
+        )
+      } catch (constraintError) {
+        const cameras = await Html5Qrcode.getCameras()
 
-      await scannerInstanceRef.current.start(
-        preferredCamera.id,
-        {
-          fps: 10,
-          qrbox: { width: 240, height: 120 },
-          aspectRatio: 1.7777778,
-        },
-        async (decodedText) => {
-          setManualBarcode(decodedText)
-          await scannerInstanceRef.current?.stop().catch(() => null)
-          await lookupBarcode(decodedText)
-          setScannerReady(false)
-        },
-        () => null
-      )
+        if (!cameras.length) {
+          throw constraintError
+        }
+
+        const preferredCamera =
+          cameras.find((camera) => camera.label.toLowerCase().includes('back')) ?? cameras[0]
+
+        await scannerInstanceRef.current.start(
+          preferredCamera.id,
+          config,
+          handleDecodedText,
+          () => null
+        )
+      }
 
       setScannerReady(true)
       setLookupState({
@@ -542,7 +665,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
     } catch (error) {
       setLookupState({
         loading: false,
-        error: error.message,
+        error: formatScannerError(error),
         message: '',
       })
     }
@@ -561,6 +684,47 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
       error: '',
       message: 'Camera closed. You can still paste a barcode manually.',
     })
+  }
+
+  async function handleFileScan(event) {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    setFileScanBusy(true)
+    setLookupState({
+      loading: false,
+      error: '',
+      message: 'Reading barcode from your photo...',
+    })
+
+    try {
+      const { Html5Qrcode } = await import('html5-qrcode')
+
+      if (!scannerNodeRef.current) {
+        throw new Error('Scanner container is not ready yet.')
+      }
+
+      if (!scannerInstanceRef.current) {
+        scannerInstanceRef.current = new Html5Qrcode(scannerNodeRef.current.id)
+      }
+
+      const decodedText = await scannerInstanceRef.current.scanFile(file, true)
+      setManualBarcode(decodedText)
+      await lookupBarcode(decodedText)
+    } catch (error) {
+      setLookupState({
+        loading: false,
+        error:
+          'That photo could not be read as a barcode. Try a clearer picture, or enter the barcode manually.',
+        message: '',
+      })
+    } finally {
+      event.target.value = ''
+      setFileScanBusy(false)
+    }
   }
 
   return (
@@ -588,6 +752,18 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
         >
           Stop camera
         </button>
+      </div>
+
+      <div className="file-scan">
+        <label htmlFor="barcodePhoto">Scan from photo</label>
+        <input
+          id="barcodePhoto"
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileScan}
+          disabled={fileScanBusy}
+        />
       </div>
 
       <div id="barcode-scanner" className="scanner-shell" ref={scannerNodeRef} />
@@ -662,6 +838,8 @@ function App() {
   const [installMessage, setInstallMessage] = useState('')
   const [deletingId, setDeletingId] = useState('')
   const [fitbitBusy, setFitbitBusy] = useState(false)
+  const [goalBadges, setGoalBadges] = useState([])
+  const playedBadgeDatesRef = useRef(new Set())
 
   const foodAssessment = useMemo(() => {
     if (!dashboard) {
@@ -681,14 +859,16 @@ function App() {
     }
 
     try {
-      const [dashboardData, historyData, fitbitData] = await Promise.all([
+      const [dashboardData, historyData, fitbitData, celebrationsData] = await Promise.all([
         fetchJson('/api/dashboard'),
         fetchJson('/api/history'),
         fetchJson('/api/fitbit/status'),
+        fetchJson('/api/celebrations'),
       ])
       setDashboard(dashboardData)
       setHistory(historyData)
       setFitbit(fitbitData)
+      setGoalBadges(celebrationsData.goalBadges ?? [])
       setGoalValue(String(dashboardData.settings.sodiumGoalMg))
       setStatus({ loading: false, error: '' })
     } catch (error) {
@@ -784,6 +964,48 @@ function App() {
       sodiumGoalMg: dashboard.settings.sodiumGoalMg,
     }
   }, [dashboard, fitbit.summary?.stepsToday])
+
+  useEffect(() => {
+    if (!celebration || !dashboard) {
+      return
+    }
+
+    let cancelled = false
+
+    async function claimTodayBadge() {
+      try {
+        const result = await fetchJson('/api/celebrations/claim', {
+          method: 'POST',
+          body: JSON.stringify({
+            date: dashboard.today.date,
+            steps: celebration.stepsToday,
+            sodiumTotalMg: celebration.sodiumTotalMg,
+            sodiumGoalMg: celebration.sodiumGoalMg,
+          }),
+        })
+
+        if (cancelled) {
+          return
+        }
+
+        setGoalBadges(result.goalBadges ?? [])
+
+        if (result.created && !playedBadgeDatesRef.current.has(dashboard.today.date)) {
+          playedBadgeDatesRef.current.add(dashboard.today.date)
+          setSavingState('Hooray! You earned a new gold badge today.')
+          playCelebrationSound().catch(() => null)
+        }
+      } catch {
+        // If the claim request fails, we still keep the visible celebration banner.
+      }
+    }
+
+    claimTodayBadge()
+
+    return () => {
+      cancelled = true
+    }
+  }, [celebration, dashboard])
 
   async function handleInstallClick() {
     if (!installPrompt) {
@@ -1221,6 +1443,21 @@ function App() {
         />
       </section>
 
+      <section className="summary-grid summary-grid--badges">
+        <SummaryCard
+          title="Gold Badges"
+          value={String(goalBadges.length)}
+          helper="Successful step and sodium goal days saved"
+          tone="warning"
+        />
+        <SummaryCard
+          title="Today Steps"
+          value={(fitbit.summary?.stepsToday ?? 0).toLocaleString()}
+          helper={`Goal is ${CELEBRATION_STEPS_GOAL.toLocaleString()} steps`}
+          tone={celebration ? 'success' : 'neutral'}
+        />
+      </section>
+
       <section className="content-grid">
         <div className="content-column">
           <section className="panel">
@@ -1545,6 +1782,8 @@ function App() {
               </div>
             ) : null}
           </section>
+
+          <GoalBadgesPanel goalBadges={goalBadges} />
         </div>
 
         <div className="content-column">

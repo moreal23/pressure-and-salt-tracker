@@ -362,6 +362,10 @@ body {
   margin-top: 24px;
 }
 
+.summary-grid--badges {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .summary-card {
   padding: 22px;
 }
@@ -550,6 +554,12 @@ textarea {
   gap: 8px;
 }
 
+.file-scan {
+  margin-bottom: 16px;
+  display: grid;
+  gap: 8px;
+}
+
 .status {
   margin: 14px 0 0;
   padding: 12px 14px;
@@ -712,6 +722,61 @@ textarea {
   color: #435856;
 }
 
+.badge-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.badge-summary strong {
+  font-size: 2.4rem;
+  color: #8b6412;
+}
+
+.badge-summary span {
+  color: #617572;
+  font-weight: 600;
+}
+
+.badge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.badge-card {
+  padding: 18px 16px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 230, 150, 0.82), transparent 34%),
+    linear-gradient(180deg, rgba(255, 249, 229, 0.96), rgba(255, 239, 190, 0.92));
+  border: 1px solid rgba(176, 131, 19, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  display: grid;
+  gap: 6px;
+}
+
+.badge-card strong {
+  color: #6c4d07;
+}
+
+.badge-card small {
+  color: #755b1f;
+}
+
+.badge-medal {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffd76a, #d7a516);
+  color: #fff7d6;
+  font-size: 1.4rem;
+  box-shadow: 0 10px 20px rgba(176, 131, 19, 0.2);
+}
+
 .chart-wrap {
   width: 100%;
   height: 280px;
@@ -872,7 +937,9 @@ textarea {
   .form-grid,
   .today-grid,
   .food-check,
-  .fitbit-summary {
+  .fitbit-summary,
+  .badge-grid,
+  .summary-grid--badges {
     grid-template-columns: 1fr;
   }
 

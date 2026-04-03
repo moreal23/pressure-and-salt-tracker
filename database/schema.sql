@@ -37,6 +37,14 @@ CREATE TABLE IF NOT EXISTS fitbit_connection (
   CONSTRAINT single_fitbit_row CHECK (id = 1)
 );
 
+CREATE TABLE IF NOT EXISTS goal_badges (
+  date_key DATE PRIMARY KEY,
+  steps INTEGER NOT NULL,
+  sodium_total_mg INTEGER NOT NULL,
+  sodium_goal_mg INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 INSERT INTO app_settings (id, sodium_goal_mg)
 VALUES (1, 2300)
 ON CONFLICT (id) DO NOTHING;

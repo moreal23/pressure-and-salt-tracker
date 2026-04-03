@@ -39,6 +39,18 @@ export class D1Store {
         VALUES (1, NULL, NULL, NULL, '', '', '', NULL, '', CURRENT_TIMESTAMP)
       `
     ).run()
+
+    await this.db.prepare(
+      `
+        CREATE TABLE IF NOT EXISTS goal_badges (
+          date_key TEXT PRIMARY KEY,
+          steps INTEGER NOT NULL,
+          sodium_total_mg INTEGER NOT NULL,
+          sodium_goal_mg INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `
+    ).run()
   }
 
   mapBloodPressureRow(row) {
@@ -221,6 +233,75 @@ export class D1Store {
         : null,
       summary,
       pendingAuthState: row?.pendingAuthState ?? '',
+    }
+  }
+
+  async getGoalBadges() {
+    await this.ensureSetup()
+    const result = await this.db
+      .prepare(
+        `
+          SELECT
+            date_key AS date,
+            steps,
+            sodium_total_mg AS sodiumTotalMg,
+            sodium_goal_mg AS sodiumGoalMg,
+            created_at AS createdAt
+          FROM goal_badges
+          ORDER BY date_key DESC
+        `
+      )
+      .all()
+
+    return (result.results ?? []).map((row) => ({
+      date: row.date,
+      steps: Number(row.steps),
+      sodiumTotalMg: Number(row.sodiumTotalMg),
+      sodiumGoalMg: Number(row.sodiumGoalMg),
+      createdAt: row.createdAt,
+    }))
+  }
+
+  async claimGoalBadge(badge) {
+    await this.ensureSetup()
+    const result = await this.db
+      .prepare(
+        `
+          INSERT OR IGNORE INTO goal_badges (date_key, steps, sodium_total_mg, sodium_goal_mg, created_at)
+          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `
+      )
+      .bind(badge.date, badge.steps, badge.sodiumTotalMg, badge.sodiumGoalMg)
+      .run()
+
+    const savedBadge = await this.db
+      .prepare(
+        `
+          SELECT
+            date_key AS date,
+            steps,
+            sodium_total_mg AS sodiumTotalMg,
+            sodium_goal_mg AS sodiumGoalMg,
+            created_at AS createdAt
+          FROM goal_badges
+          WHERE date_key = ?
+        `
+      )
+      .bind(badge.date)
+      .first()
+
+    return {
+      created: Number(result.meta?.changes ?? 0) > 0,
+      badge: savedBadge
+        ? {
+            date: savedBadge.date,
+            steps: Number(savedBadge.steps),
+            sodiumTotalMg: Number(savedBadge.sodiumTotalMg),
+            sodiumGoalMg: Number(savedBadge.sodiumGoalMg),
+            createdAt: savedBadge.createdAt,
+          }
+        : null,
+      goalBadges: await this.getGoalBadges(),
     }
   }
 

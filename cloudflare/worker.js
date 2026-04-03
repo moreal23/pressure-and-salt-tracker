@@ -14,6 +14,7 @@ import {
   lookupBarcode,
   parseBloodPressurePayload,
   parseFoodLogPayload,
+  parseGoalBadgePayload,
   parseImportPayload,
   parseImportedBloodPressureText,
   parseSettingsPayload,
@@ -49,6 +50,18 @@ async function handleApiRequest(request, env) {
       bloodPressureLogs,
       foodLogs,
     })
+  }
+
+  if (pathname === '/api/celebrations' && method === 'GET') {
+    return jsonResponse({
+      goalBadges: await store.getGoalBadges(),
+    })
+  }
+
+  if (pathname === '/api/celebrations/claim' && method === 'POST') {
+    const body = await readJson(request)
+    const result = await store.claimGoalBadge(parseGoalBadgePayload(body))
+    return jsonResponse(result, result.created ? 201 : 200)
   }
 
   if (pathname === '/api/fitbit/status' && method === 'GET') {

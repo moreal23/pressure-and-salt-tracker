@@ -118,6 +118,24 @@ export function parseImportPayload(body) {
   return { rawText }
 }
 
+export function parseGoalBadgePayload(body) {
+  const date = ensureString(body?.date, 'Badge date', 10, 10)
+  const steps = ensureNumber(body?.steps, 'Steps', 0, 200000)
+  const sodiumTotalMg = ensureNumber(body?.sodiumTotalMg, 'Sodium total', 0, 10000)
+  const sodiumGoalMg = ensureNumber(body?.sodiumGoalMg, 'Sodium goal', 500, 10000)
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error('Badge date must be in YYYY-MM-DD format.')
+  }
+
+  return {
+    date,
+    steps,
+    sodiumTotalMg,
+    sodiumGoalMg,
+  }
+}
+
 export function normalizeHeaderName(value) {
   return String(value ?? '')
     .toLowerCase()

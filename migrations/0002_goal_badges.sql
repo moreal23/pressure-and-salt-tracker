@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS goal_badges (
+  date_key TEXT PRIMARY KEY,
+  steps INTEGER NOT NULL,
+  sodium_total_mg INTEGER NOT NULL,
+  sodium_goal_mg INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

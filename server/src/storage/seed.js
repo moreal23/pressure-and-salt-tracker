@@ -150,6 +150,7 @@ function createSeedData() {
         loggedAt: withTime(daysAgo(6), 16, 50),
       },
     ],
+    goalBadges: [],
   }
 }
 

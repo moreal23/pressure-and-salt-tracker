@@ -68,6 +68,14 @@ class PostgresStore {
         CONSTRAINT single_fitbit_row CHECK (id = 1)
       );
 
+      CREATE TABLE IF NOT EXISTS goal_badges (
+        date_key DATE PRIMARY KEY,
+        steps INTEGER NOT NULL,
+        sodium_total_mg INTEGER NOT NULL,
+        sodium_goal_mg INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       INSERT INTO app_settings (id, sodium_goal_mg)
       VALUES (1, 2300)
       ON CONFLICT (id) DO NOTHING;
@@ -208,6 +216,63 @@ class PostgresStore {
           }
         : null,
       summary: row.summary ?? null,
+    }
+  }
+
+  async getGoalBadges() {
+    const result = await this.pool.query(
+      `
+        SELECT
+          date_key::text AS date,
+          steps,
+          sodium_total_mg AS "sodiumTotalMg",
+          sodium_goal_mg AS "sodiumGoalMg",
+          created_at AS "createdAt"
+        FROM goal_badges
+        ORDER BY date_key DESC
+      `
+    )
+
+    return result.rows
+  }
+
+  async claimGoalBadge(badge) {
+    const insertResult = await this.pool.query(
+      `
+        INSERT INTO goal_badges (date_key, steps, sodium_total_mg, sodium_goal_mg)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (date_key) DO NOTHING
+        RETURNING
+          date_key::text AS date,
+          steps,
+          sodium_total_mg AS "sodiumTotalMg",
+          sodium_goal_mg AS "sodiumGoalMg",
+          created_at AS "createdAt"
+      `,
+      [badge.date, badge.steps, badge.sodiumTotalMg, badge.sodiumGoalMg]
+    )
+
+    const created = insertResult.rowCount > 0
+    const savedBadge =
+      insertResult.rows[0] ??
+      (await this.pool.query(
+        `
+          SELECT
+            date_key::text AS date,
+            steps,
+            sodium_total_mg AS "sodiumTotalMg",
+            sodium_goal_mg AS "sodiumGoalMg",
+            created_at AS "createdAt"
+          FROM goal_badges
+          WHERE date_key = $1
+        `,
+        [badge.date]
+      )).rows[0]
+
+    return {
+      created,
+      badge: savedBadge,
+      goalBadges: await this.getGoalBadges(),
     }
   }
 

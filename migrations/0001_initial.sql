@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS fitbit_connection (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS goal_badges (
+  date_key TEXT PRIMARY KEY,
+  steps INTEGER NOT NULL,
+  sodium_total_mg INTEGER NOT NULL,
+  sodium_goal_mg INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 INSERT OR IGNORE INTO app_settings (id, sodium_goal_mg, updated_at)
 VALUES (1, 2300, CURRENT_TIMESTAMP);
 

@@ -48,6 +48,9 @@ class JsonStore {
         summary: null,
       }
     }
+    if (!parsed.goalBadges) {
+      parsed.goalBadges = []
+    }
     return parsed
   }
 
@@ -148,6 +151,34 @@ class JsonStore {
     return data.fitbit ?? {
       connection: null,
       summary: null,
+    }
+  }
+
+  async getGoalBadges() {
+    const data = await this.readData()
+    return [...data.goalBadges].sort((left, right) => right.date.localeCompare(left.date))
+  }
+
+  async claimGoalBadge(badge) {
+    const data = await this.readData()
+    const existingBadge = data.goalBadges.find((entry) => entry.date === badge.date)
+
+    if (existingBadge) {
+      return {
+        created: false,
+        badge: existingBadge,
+        goalBadges: [...data.goalBadges].sort((left, right) => right.date.localeCompare(left.date)),
+      }
+    }
+
+    data.goalBadges.push(badge)
+    data.goalBadges.sort((left, right) => right.date.localeCompare(left.date))
+    await this.writeData(data)
+
+    return {
+      created: true,
+      badge,
+      goalBadges: data.goalBadges,
     }
   }
 
