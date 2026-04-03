@@ -904,6 +904,7 @@ function App() {
   const [screenshotBusy, setScreenshotBusy] = useState(false)
   const [installPrompt, setInstallPrompt] = useState(null)
   const [installMessage, setInstallMessage] = useState('')
+  const [isInstalled, setIsInstalled] = useState(false)
   const [deletingId, setDeletingId] = useState('')
   const [fitbitBusy, setFitbitBusy] = useState(false)
   const [goalBadges, setGoalBadges] = useState([])
@@ -977,6 +978,7 @@ function App() {
       window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true
 
     if (standalone) {
+      setIsInstalled(true)
       setInstallMessage('This app is already installed on this device.')
     }
 
@@ -987,6 +989,7 @@ function App() {
     }
 
     function handleAppInstalled() {
+      setIsInstalled(true)
       setInstallPrompt(null)
       setInstallMessage('App installed. You can open it from your home screen.')
     }
@@ -1078,8 +1081,18 @@ function App() {
   }, [celebration, dashboard])
 
   async function handleInstallClick() {
+    if (isInstalled) {
+      setInstallMessage('This app is already installed on this device.')
+      return
+    }
+
     if (!installPrompt) {
-      setInstallMessage('Install prompts appear on localhost or after deployment over HTTPS.')
+      const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent)
+      setInstallMessage(
+        isIos
+          ? 'Open this site in Safari, tap Share, then choose Add to Home Screen.'
+          : 'Open this site in Chrome, tap the browser menu, then choose Install app or Add to Home screen.'
+      )
       return
     }
 
@@ -1497,8 +1510,13 @@ function App() {
             <span>Phone camera scan</span>
           </div>
           <div className="install-strip">
-            <button className="button button--install" type="button" onClick={handleInstallClick}>
-              Install on phone
+            <button
+              className="button button--install"
+              type="button"
+              onClick={handleInstallClick}
+              disabled={isInstalled}
+            >
+              {isInstalled ? 'Installed on phone' : 'Install on phone'}
             </button>
             <p>
               {installMessage ||
