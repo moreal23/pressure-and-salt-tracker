@@ -6,6 +6,7 @@ import {
   getFitbitConfig,
   isFitbitConfigured,
   syncFitbitData,
+  syncFitbitIfStale,
 } from './fitbit.js'
 import {
   errorResponse,
@@ -227,6 +228,21 @@ async function sendDueReminderMessages(env) {
   return { sentCount, reason: 'ok' }
 }
 
+async function syncScheduledFitbitData(env) {
+  const store = new D1Store(env)
+  const fitbitConfig = getFitbitConfig(env)
+
+  if (!isFitbitConfigured(fitbitConfig)) {
+    return
+  }
+
+  try {
+    await syncFitbitIfStale(store, fitbitConfig)
+  } catch (error) {
+    console.error('Scheduled Fitbit sync failed:', error)
+  }
+}
+
 async function handleApiRequest(request, env) {
   const url = new URL(request.url)
   const pathname = url.pathname
@@ -443,7 +459,7 @@ async function handleApiRequest(request, env) {
         return errorResponse('The current PIN did not match.', 400)
       }
     }
-
+    
     await store.setPrivacyPinHash(await hashPrivacyPin(pin))
     return jsonResponse({ pinEnabled: true }, 201)
   }
@@ -764,5 +780,6 @@ export default {
   },
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(sendDueReminderMessages(env))
+    ctx.waitUntil(syncScheduledFitbitData(env))
   },
 }

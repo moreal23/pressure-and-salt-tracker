@@ -3476,10 +3476,6 @@ function App() {
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">Blood Pressure + Sodium Tracker</p>
-          <h1>Your daily blood pressure, sodium, and wellness dashboard.</h1>
-          <p className="hero-text">
-            Track blood pressure, sodium intake, medications, Fitbit activity, and food scans in one place with tools that help you stay on top of your daily routine.
-          </p>
           <div className="hero-badges">
             <span>Blood pressure tracking</span>
             <span>Sodium goals</span>

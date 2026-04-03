@@ -1,5 +1,5 @@
-export function getFitbitConfig(env, request) {
-  const origin = new URL(request.url).origin
+export function getFitbitConfig(env, request = null) {
+  const origin = request ? new URL(request.url).origin : env.FRONTEND_URL ?? ''
 
   return {
     clientId: env.FITBIT_CLIENT_ID ?? '',
@@ -196,4 +196,21 @@ export async function syncFitbitData(store, config) {
     summary,
     pendingAuthState: '',
   })
+}
+
+export async function syncFitbitIfStale(store, config, maxAgeMs = 15 * 60 * 1000) {
+  const fitbitState = await store.getFitbitState()
+
+  if (!fitbitState.connection?.accessToken) {
+    return fitbitState
+  }
+
+  const lastSyncAt = fitbitState.summary?.lastSyncAt ? new Date(fitbitState.summary.lastSyncAt).getTime() : 0
+  const isFresh = lastSyncAt && Date.now() - lastSyncAt < maxAgeMs
+
+  if (isFresh) {
+    return fitbitState
+  }
+
+  return syncFitbitData(store, config)
 }
