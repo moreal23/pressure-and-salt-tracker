@@ -847,16 +847,6 @@ app.post('/api/privacy/clear', async (request, response, next) => {
   }
 })
 
-app.post('/api/privacy/forgot-reset', async (request, response, next) => {
-  try {
-    const store = await storePromise
-    await store.clearPrivacyPinHash()
-    response.json({ pinEnabled: false })
-  } catch (error) {
-    next(error)
-  }
-})
-
 app.post('/api/reminders', async (request, response, next) => {
   try {
     const parsed = reminderSchema.parse(request.body)

@@ -1019,7 +1019,7 @@ function PrivacyPanel({ privacyState, setPrivacyState, onSavePin, onClearPin, on
   )
 }
 
-function PrivacyLockScreen({ unlockPin, setUnlockPin, onUnlock, onForgotPin, busy, error }) {
+function PrivacyLockScreen({ unlockPin, setUnlockPin, onUnlock, busy, error }) {
   const [showUnlockPin, setShowUnlockPin] = useState(false)
 
   return (
@@ -1048,14 +1048,7 @@ function PrivacyLockScreen({ unlockPin, setUnlockPin, onUnlock, onForgotPin, bus
           <button className="button button--solid" type="submit" disabled={busy}>
             {busy ? 'Unlocking...' : 'Unlock app'}
           </button>
-          <button className="button button--ghost" type="button" onClick={onForgotPin} disabled={busy}>
-            Forgot PIN
-          </button>
         </form>
-
-        <div className="import-hint">
-          Forgot PIN will remove the simple lock for this app so you can get back in and set a new one.
-        </div>
         {error ? <p className="status status--error">{error}</p> : null}
       </div>
     </main>
@@ -2837,50 +2830,6 @@ function App() {
     }
   }
 
-  async function handlePrivacyForgotPin() {
-    const confirmed = window.confirm(
-      'Forgot PIN will turn off the simple app lock so you can get back in and set a new one. Continue?'
-    )
-
-    if (!confirmed) {
-      return
-    }
-
-    setPrivacyState((current) => ({
-      ...current,
-      busy: 'forgot',
-      error: '',
-      message: '',
-    }))
-
-    try {
-      await fetchJson('/api/privacy/forgot-reset', {
-        method: 'POST',
-      })
-
-      window.sessionStorage.removeItem(PRIVACY_UNLOCK_KEY)
-      setPrivacyState((current) => ({
-        ...current,
-        pinEnabled: false,
-        unlocked: true,
-        busy: '',
-        unlockPin: '',
-        currentPin: '',
-        newPin: '',
-        confirmPin: '',
-        error: '',
-        message: 'PIN lock was reset. You can set a new one whenever you want.',
-      }))
-      await loadDashboard({ silent: true, skipFitbitStartupSync: true })
-    } catch (error) {
-      setPrivacyState((current) => ({
-        ...current,
-        busy: '',
-        error: error.message,
-      }))
-    }
-  }
-
   function handlePrivacyLockNow() {
     window.sessionStorage.removeItem(PRIVACY_UNLOCK_KEY)
     setPrivacyState((current) => ({
@@ -3242,8 +3191,7 @@ function App() {
           }))
         }
         onUnlock={handlePrivacyUnlock}
-        onForgotPin={handlePrivacyForgotPin}
-        busy={privacyState.busy === 'unlock' || privacyState.busy === 'forgot'}
+        busy={privacyState.busy === 'unlock'}
         error={privacyState.error}
       />
     )

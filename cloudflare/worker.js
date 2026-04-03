@@ -305,11 +305,6 @@ async function handleApiRequest(request, env) {
     return jsonResponse({ pinEnabled: false })
   }
 
-  if (pathname === '/api/privacy/forgot-reset' && method === 'POST') {
-    await store.clearPrivacyPinHash()
-    return jsonResponse({ pinEnabled: false })
-  }
-
   if (pathname === '/api/telegram/status' && method === 'GET') {
     const telegramConfig = getTelegramConfig(env)
 
