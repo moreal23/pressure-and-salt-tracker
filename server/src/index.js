@@ -507,50 +507,61 @@ function parseNutrientToMg(value, unit) {
   return Math.round(numericValue)
 }
 
+function getBarcodeLookupCandidates(barcode) {
+  const normalized = String(barcode ?? '').replace(/\D/g, '')
+  const candidates = [normalized]
+
+  if (normalized.length === 10) {
+    candidates.push(`0${normalized}`)
+    candidates.push(`00${normalized}`)
+  } else if (normalized.length === 11) {
+    candidates.push(`0${normalized}`)
+  } else if (normalized.length === 12) {
+    candidates.push(`0${normalized}`)
+  }
+
+  return [...new Set(candidates)].filter(Boolean)
+}
+
 async function lookupBarcode(barcode) {
   const fallbackItem = barcodeFallbacks[barcode]
+  const candidates = getBarcodeLookupCandidates(barcode)
 
   try {
-    const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}.json`)
+    for (const candidate of candidates) {
+      const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${candidate}.json`)
+      const payload = await response.json().catch(() => ({}))
 
-    if (!response.ok) {
-      throw new Error('The nutrition lookup service is not available right now.')
-    }
-
-    const payload = await response.json()
-
-    if (!payload.product) {
-      if (fallbackItem) {
-        return {
-          barcode,
-          ...fallbackItem,
-        }
+      if (!response.ok) {
+        throw new Error('The nutrition lookup service is not available right now.')
       }
 
-      throw new Error('Food not found for that barcode.')
-    }
+      if (!payload.product || payload.status === 0) {
+        continue
+      }
 
-    const product = payload.product
-    const nutriments = product.nutriments ?? {}
-    const sodiumFromSalt =
-      parseNutrientToMg(nutriments.salt_serving, nutriments.salt_serving_unit) ??
-      parseNutrientToMg(nutriments.salt_value, nutriments.salt_unit) ??
-      parseNutrientToMg(nutriments.salt, nutriments.salt_unit)
-    const sodiumMg =
-      parseNutrientToMg(nutriments.sodium_serving, nutriments.sodium_serving_unit) ??
-      parseNutrientToMg(nutriments.sodium_value, nutriments.sodium_unit) ??
-      parseNutrientToMg(nutriments.sodium, nutriments.sodium_unit) ??
-      (sodiumFromSalt != null ? Math.round(sodiumFromSalt * 0.393) : null)
+      const product = payload.product
+      const nutriments = product.nutriments ?? {}
+      const sodiumFromSalt =
+        parseNutrientToMg(nutriments.salt_serving, nutriments.salt_serving_unit) ??
+        parseNutrientToMg(nutriments.salt_value, nutriments.salt_unit) ??
+        parseNutrientToMg(nutriments.salt, nutriments.salt_unit)
+      const sodiumMg =
+        parseNutrientToMg(nutriments.sodium_serving, nutriments.sodium_serving_unit) ??
+        parseNutrientToMg(nutriments.sodium_value, nutriments.sodium_unit) ??
+        parseNutrientToMg(nutriments.sodium, nutriments.sodium_unit) ??
+        (sodiumFromSalt != null ? Math.round(sodiumFromSalt * 0.393) : null)
 
-    if (sodiumMg == null || Number.isNaN(sodiumMg)) {
-      throw new Error('The food was found, but sodium details were missing.')
-    }
+      if (sodiumMg == null || Number.isNaN(sodiumMg)) {
+        throw new Error('The food was found, but sodium details were missing.')
+      }
 
-    return {
-      barcode,
-      foodName: product.product_name || product.generic_name || 'Scanned food',
-      servingSize: product.serving_size || '1 serving',
-      sodiumMg: Math.round(sodiumMg),
+      return {
+        barcode: candidate,
+        foodName: product.product_name || product.generic_name || 'Scanned food',
+        servingSize: product.serving_size || '1 serving',
+        sodiumMg: Math.round(sodiumMg),
+      }
     }
   } catch (error) {
     if (fallbackItem) {
@@ -562,6 +573,15 @@ async function lookupBarcode(barcode) {
 
     throw error
   }
+
+  if (fallbackItem) {
+    return {
+      barcode,
+      ...fallbackItem,
+    }
+  }
+
+  throw new Error('Food not found for that barcode.')
 }
 
 app.get('/api/health', async (request, response) => {
