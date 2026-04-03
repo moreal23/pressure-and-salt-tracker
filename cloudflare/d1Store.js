@@ -8,6 +8,13 @@ function createBackupSafeFitbitState(fitbitState) {
   }
 }
 
+function getCurrentWeekStart() {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() - date.getDay())
+  return date
+}
+
 export class D1Store {
   constructor(env) {
     this.env = env
@@ -342,6 +349,11 @@ export class D1Store {
 
   async getMedicationLogs() {
     await this.ensureSetup()
+    await this.db
+      .prepare('DELETE FROM medication_logs WHERE taken_at < ?')
+      .bind(getCurrentWeekStart().toISOString())
+      .run()
+
     const result = await this.db
       .prepare(
         `
@@ -362,6 +374,11 @@ export class D1Store {
 
   async addMedicationLog(entry) {
     await this.ensureSetup()
+    await this.db
+      .prepare('DELETE FROM medication_logs WHERE taken_at < ?')
+      .bind(getCurrentWeekStart().toISOString())
+      .run()
+
     await this.db
       .prepare(
         `

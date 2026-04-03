@@ -25,6 +25,13 @@ function listLastSevenDays() {
   return dates
 }
 
+function getCurrentWeekStart() {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() - date.getDay())
+  return date
+}
+
 class PostgresStore {
   constructor(connectionString) {
     this.storageMode = 'postgres'
@@ -306,6 +313,8 @@ class PostgresStore {
   }
 
   async getMedicationLogs() {
+    await this.pool.query('DELETE FROM medication_logs WHERE taken_at < $1', [getCurrentWeekStart().toISOString()])
+
     const result = await this.pool.query(
       `
         SELECT
@@ -323,6 +332,8 @@ class PostgresStore {
   }
 
   async addMedicationLog(entry) {
+    await this.pool.query('DELETE FROM medication_logs WHERE taken_at < $1', [getCurrentWeekStart().toISOString()])
+
     await this.pool.query(
       `
         INSERT INTO medication_logs (id, medication_name, dosage, taken_at, notes)

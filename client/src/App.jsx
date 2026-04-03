@@ -515,7 +515,7 @@ function MedicationPanel({
           <p className="eyebrow">Medication</p>
           <h2>Track medicine doses</h2>
         </div>
-        <p className="panel-copy">Log what you took, the dosage, and when you took it.</p>
+        <p className="panel-copy">Log what you took, the dosage, and when you took it. Medication logs reset automatically each new week.</p>
       </div>
 
       <form className="form-grid" onSubmit={onSubmit}>

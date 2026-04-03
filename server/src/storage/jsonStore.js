@@ -31,6 +31,13 @@ function listLastSevenDays() {
   return dates
 }
 
+function getCurrentWeekStart() {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() - date.getDay())
+  return date
+}
+
 class JsonStore {
   constructor() {
     this.storageMode = 'json'
@@ -202,11 +209,21 @@ class JsonStore {
 
   async getMedicationLogs() {
     const data = await this.readData()
+    const cutoff = getCurrentWeekStart().getTime()
+    const nextLogs = data.medicationLogs.filter((entry) => new Date(entry.takenAt).getTime() >= cutoff)
+
+    if (nextLogs.length !== data.medicationLogs.length) {
+      data.medicationLogs = nextLogs
+      await this.writeData(data)
+    }
+
     return [...data.medicationLogs].sort((left, right) => new Date(right.takenAt) - new Date(left.takenAt))
   }
 
   async addMedicationLog(entry) {
     const data = await this.readData()
+    const cutoff = getCurrentWeekStart().getTime()
+    data.medicationLogs = data.medicationLogs.filter((item) => new Date(item.takenAt).getTime() >= cutoff)
     const nextEntry = {
       id: randomUUID(),
       ...entry,
