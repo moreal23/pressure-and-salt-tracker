@@ -53,7 +53,7 @@ const importExample = `date,time,systolic,diastolic,pulse,notes
 04/04/2026,7:40 AM,128,82,71,Before breakfast`
 const CELEBRATION_STEPS_GOAL = 15000
 const REMINDER_CHECK_INTERVAL_MS = 30_000
-const AUTO_LOCK_AFTER_MS = 5_000
+const AUTO_LOCK_AFTER_MS = 5 * 60_000
 const PRIVACY_UNLOCK_KEY = 'pressure-salt-unlocked'
 
 function formatImportDate(date) {
@@ -549,7 +549,7 @@ function AccountPanel({ username, onLogout, busy }) {
         <p className="eyebrow">Account</p>
         <h2>Signed in</h2>
       </div>
-      <p className="panel-copy">This website now uses a real account login and signs out automatically after 5 seconds without activity.</p>
+      <p className="panel-copy">This website now uses a real account login and signs out automatically after 5 minutes without activity.</p>
     </div>
 
       <div className="privacy-banner">
@@ -2576,7 +2576,7 @@ function App() {
       window.clearTimeout(timeoutId)
       timeoutId = window.setTimeout(() => {
         handleLogout().then(() => {
-          setSavingState('The website locked after 5 seconds of inactivity.')
+          setSavingState('The website locked after 5 minutes of inactivity.')
         }).catch(() => null)
       }, AUTO_LOCK_AFTER_MS)
     }
