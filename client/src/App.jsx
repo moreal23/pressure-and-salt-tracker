@@ -254,6 +254,48 @@ async function fetchJson(path, options) {
   return body
 }
 
+async function decodeBarcodeFromPhoto(file, scannerNodeRef, scannerInstanceRef) {
+  const BarcodeDetectorClass = window.BarcodeDetector
+
+  if (BarcodeDetectorClass) {
+    try {
+      const detector = new BarcodeDetectorClass({
+        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code'],
+      })
+      const bitmap = await createImageBitmap(file)
+
+      try {
+        const detected = await detector.detect(bitmap)
+        const rawValue = detected.find((entry) => entry.rawValue?.trim())?.rawValue?.trim()
+
+        if (rawValue) {
+          return rawValue
+        }
+      } finally {
+        bitmap.close?.()
+      }
+    } catch {
+      // Fall through to the library decoder below.
+    }
+  }
+
+  const { Html5Qrcode } = await import('html5-qrcode')
+
+  if (!scannerNodeRef.current) {
+    throw new Error('Scanner container is not ready yet.')
+  }
+
+  if (!scannerInstanceRef.current) {
+    scannerInstanceRef.current = new Html5Qrcode(scannerNodeRef.current.id)
+  }
+
+  try {
+    return await scannerInstanceRef.current.scanFile(file, true)
+  } catch {
+    return scannerInstanceRef.current.scanFile(file, false)
+  }
+}
+
 async function playCelebrationSound() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext
 
@@ -1084,28 +1126,18 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
     setLookupState({
       loading: false,
       error: '',
-      message: 'Reading barcode from your photo...',
+      message: 'Reading barcode from your photo and looking up the food...',
     })
 
     try {
-      const { Html5Qrcode } = await import('html5-qrcode')
-
-      if (!scannerNodeRef.current) {
-        throw new Error('Scanner container is not ready yet.')
-      }
-
-      if (!scannerInstanceRef.current) {
-        scannerInstanceRef.current = new Html5Qrcode(scannerNodeRef.current.id)
-      }
-
-      const decodedText = await scannerInstanceRef.current.scanFile(file, true)
+      const decodedText = await decodeBarcodeFromPhoto(file, scannerNodeRef, scannerInstanceRef)
       setManualBarcode(decodedText)
       await lookupBarcode(decodedText)
     } catch (error) {
       setLookupState({
         loading: false,
         error:
-          'That photo could not be read as a barcode. Try a clearer picture, or enter the barcode manually.',
+          'The photo was captured, but the barcode could not be read. Try another close, well-lit photo that shows only the barcode, or enter the barcode manually.',
         message: '',
       })
     } finally {
@@ -1132,7 +1164,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
         </div>
         <p className="panel-copy">
           {preferPhotoCapture
-            ? 'On phones, the main scan button opens your camera or photo picker so you can capture a barcode quickly.'
+            ? 'On phones, the main scan button opens your camera or photo picker, then the app reads the barcode from the photo and loads the food automatically.'
             : 'On larger screens, the scanner opens inside the website so you can scan a barcode without leaving the page.'}
         </p>
       </div>
