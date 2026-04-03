@@ -1512,6 +1512,7 @@ function App() {
   const fitbitSyncInFlightRef = useRef(false)
   const lastAutoSyncAttemptRef = useRef(0)
   const fitbitSessionAutoSyncRef = useRef(false)
+  const fitbitStartupSyncRef = useRef(false)
   const triggeredRemindersRef = useRef(new Set())
 
   const foodAssessment = useMemo(() => {
@@ -1548,6 +1549,23 @@ function App() {
       setReminders(reminderData.reminders ?? [])
       setGoalValue(String(dashboardData.settings.sodiumGoalMg))
       setStatus({ loading: false, error: '' })
+
+      const lastSyncAt = fitbitData.summary?.lastSyncAt ? new Date(fitbitData.summary.lastSyncAt).getTime() : 0
+      const syncIsStale = !lastSyncAt || Date.now() - lastSyncAt > 2 * 60 * 1000
+
+      if (
+        !options.skipFitbitStartupSync &&
+        fitbitData.connected &&
+        fitbitData.configured &&
+        syncIsStale &&
+        !fitbitStartupSyncRef.current
+      ) {
+        fitbitStartupSyncRef.current = true
+        lastAutoSyncAttemptRef.current = Date.now()
+        syncFitbitData({ silent: true }).finally(() => {
+          fitbitStartupSyncRef.current = false
+        })
+      }
     } catch (error) {
       setStatus({ loading: false, error: error.message })
     }
