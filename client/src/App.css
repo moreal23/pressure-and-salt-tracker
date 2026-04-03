@@ -42,6 +42,7 @@ body {
 }
 
 .loading-card,
+.celebration-banner,
 .hero,
 .summary-card,
 .panel {
@@ -63,6 +64,182 @@ body {
   padding: 28px;
   background: rgba(255, 250, 244, 0.82);
   border-radius: 34px;
+}
+
+.celebration-banner {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 20px;
+  padding: 26px 24px;
+  border-radius: 34px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 102, 0.5), transparent 28%),
+    radial-gradient(circle at top right, rgba(111, 210, 255, 0.38), transparent 24%),
+    linear-gradient(135deg, rgba(255, 247, 222, 0.98), rgba(235, 255, 241, 0.96));
+}
+
+.celebration-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 60ch;
+}
+
+.celebration-copy h2 {
+  margin: 0;
+  font-family: Georgia, serif;
+  font-size: clamp(2rem, 3.4vw, 3.3rem);
+  line-height: 1.05;
+  color: #0d5a51;
+}
+
+.celebration-copy p:last-child {
+  margin: 14px 0 0;
+  font-size: 1.05rem;
+  color: #31524f;
+}
+
+.celebration-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -16%;
+  width: 12px;
+  height: 22px;
+  border-radius: 999px;
+  opacity: 0.9;
+  animation: confetti-drop 4.6s linear infinite;
+}
+
+.confetti-piece--1 {
+  left: 6%;
+  background: #ff6b6b;
+  animation-delay: -0.4s;
+}
+
+.confetti-piece--2 {
+  left: 14%;
+  background: #ffd166;
+  animation-delay: -1.3s;
+}
+
+.confetti-piece--3 {
+  left: 24%;
+  background: #06d6a0;
+  animation-delay: -2s;
+}
+
+.confetti-piece--4 {
+  left: 38%;
+  background: #4cc9f0;
+  animation-delay: -0.9s;
+}
+
+.confetti-piece--5 {
+  left: 52%;
+  background: #f72585;
+  animation-delay: -2.8s;
+}
+
+.confetti-piece--6 {
+  left: 68%;
+  background: #f77f00;
+  animation-delay: -1.8s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(7) {
+  left: 78%;
+  background: #43aa8b;
+  animation-delay: -3.1s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(8) {
+  left: 88%;
+  background: #577590;
+  animation-delay: -2.4s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(9) {
+  left: 11%;
+  width: 10px;
+  height: 18px;
+  animation-duration: 5.1s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(10) {
+  left: 19%;
+  width: 8px;
+  height: 20px;
+  animation-duration: 4.2s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(11) {
+  left: 30%;
+  width: 14px;
+  height: 18px;
+  animation-duration: 4.8s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(12) {
+  left: 45%;
+  width: 9px;
+  height: 24px;
+  animation-duration: 5.3s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(13) {
+  left: 57%;
+  width: 13px;
+  height: 18px;
+  animation-duration: 4.4s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(14) {
+  left: 63%;
+  width: 11px;
+  height: 22px;
+  animation-duration: 4.9s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(15) {
+  left: 72%;
+  width: 8px;
+  height: 18px;
+  animation-duration: 5.2s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(16) {
+  left: 82%;
+  width: 12px;
+  height: 20px;
+  animation-duration: 4.5s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(17) {
+  left: 91%;
+  width: 9px;
+  height: 22px;
+  animation-duration: 4.7s;
+}
+
+.celebration-confetti .confetti-piece:nth-child(18) {
+  left: 95%;
+  width: 13px;
+  height: 19px;
+  animation-duration: 5s;
+}
+
+@keyframes confetti-drop {
+  0% {
+    transform: translate3d(0, -30px, 0) rotate(0deg);
+  }
+
+  100% {
+    transform: translate3d(-10px, 440px, 0) rotate(540deg);
+  }
 }
 
 .hero-copy h1,
@@ -700,6 +877,7 @@ textarea {
   }
 
   .hero,
+  .celebration-banner,
   .panel,
   .hero-meter {
     padding: 18px;

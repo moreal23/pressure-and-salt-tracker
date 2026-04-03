@@ -35,6 +35,7 @@ const emptyFoodForm = {
 const importExample = `date,time,systolic,diastolic,pulse,notes
 04/03/2026,8:15 AM,132,84,75,Morning reading
 04/04/2026,7:40 AM,128,82,71,Before breakfast`
+const CELEBRATION_STEPS_GOAL = 15000
 
 function formatImportDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -765,6 +766,25 @@ function App() {
     return 'success'
   }, [dashboard])
 
+  const celebration = useMemo(() => {
+    if (!dashboard) {
+      return null
+    }
+
+    const stepsToday = Number(fitbit.summary?.stepsToday ?? 0)
+    const withinSodiumGoal = dashboard.today.sodiumTotalMg <= dashboard.settings.sodiumGoalMg
+
+    if (stepsToday < CELEBRATION_STEPS_GOAL || !withinSodiumGoal) {
+      return null
+    }
+
+    return {
+      stepsToday,
+      sodiumTotalMg: dashboard.today.sodiumTotalMg,
+      sodiumGoalMg: dashboard.settings.sodiumGoalMg,
+    }
+  }, [dashboard, fitbit.summary?.stepsToday])
+
   async function handleInstallClick() {
     if (!installPrompt) {
       setInstallMessage('Install prompts appear on localhost or after deployment over HTTPS.')
@@ -1098,6 +1118,25 @@ function App() {
 
   return (
     <main className="app-shell">
+      {celebration ? (
+        <section className="celebration-banner">
+          <div className="celebration-confetti" aria-hidden="true">
+            {Array.from({ length: 18 }, (_, index) => (
+              <span key={index} className={`confetti-piece confetti-piece--${(index % 6) + 1}`} />
+            ))}
+          </div>
+          <div className="celebration-copy">
+            <p className="eyebrow">Goal Celebration</p>
+            <h2>Hooray! You did it today.</h2>
+            <p>
+              You reached {celebration.stepsToday.toLocaleString()} steps and stayed within your{' '}
+              {celebration.sodiumGoalMg.toLocaleString()} mg sodium goal at{' '}
+              {celebration.sodiumTotalMg.toLocaleString()} mg.
+            </p>
+          </div>
+        </section>
+      ) : null}
+
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">Blood Pressure + Sodium Tracker</p>
