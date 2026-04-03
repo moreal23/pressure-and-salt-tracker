@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS app_settings (
   id INTEGER PRIMARY KEY DEFAULT 1,
   sodium_goal_mg INTEGER NOT NULL DEFAULT 2300,
+  privacy_pin_hash TEXT NOT NULL DEFAULT '',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT single_settings_row CHECK (id = 1)
 );
@@ -22,6 +23,17 @@ CREATE TABLE IF NOT EXISTS food_logs (
   meal_type TEXT NOT NULL DEFAULT 'Meal',
   barcode TEXT NOT NULL DEFAULT '',
   logged_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS favorite_foods (
+  id UUID PRIMARY KEY,
+  food_name TEXT NOT NULL,
+  serving_size TEXT NOT NULL,
+  sodium_mg INTEGER NOT NULL,
+  meal_type TEXT NOT NULL DEFAULT 'Meal',
+  barcode TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS fitbit_connection (

@@ -939,6 +939,54 @@ textarea {
   gap: 12px;
 }
 
+.summary-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.summary-chip {
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(22, 48, 47, 0.08);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.summary-chip span {
+  color: #617572;
+}
+
+.summary-chip strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.8rem;
+}
+
+.summary-chip--success {
+  background: rgba(18, 120, 81, 0.08);
+}
+
+.summary-chip--success strong {
+  color: #136348;
+}
+
+.summary-chip--warning {
+  background: rgba(199, 139, 43, 0.12);
+}
+
+.summary-chip--warning strong {
+  color: #8b5b1b;
+}
+
+.summary-chip--danger {
+  background: rgba(191, 47, 47, 0.12);
+}
+
+.summary-chip--danger strong {
+  color: #8d1f28;
+}
+
 .checklist-card {
   padding: 16px;
   border-radius: 18px;
@@ -987,6 +1035,38 @@ textarea {
 .status-copy--missed {
   color: #8d1f28 !important;
   font-weight: 600;
+}
+
+.quick-food-actions {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.quick-food-actions--form {
+  margin-top: 16px;
+}
+
+.quick-food-actions .panel-copy {
+  margin: 0;
+}
+
+.privacy-banner {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(15, 108, 97, 0.08);
+  border: 1px solid rgba(22, 48, 47, 0.08);
+}
+
+.privacy-banner strong {
+  color: #0f6c61;
+}
+
+.privacy-banner span {
+  color: #435856;
 }
 
 .today-grid {
@@ -1106,6 +1186,10 @@ textarea {
   color: #fff8f4;
 }
 
+.privacy-lock-card {
+  max-width: 520px;
+}
+
 @media (max-width: 1040px) {
   .hero,
   .content-grid,
@@ -1124,6 +1208,7 @@ textarea {
   .food-check,
   .fitbit-summary,
   .badge-grid,
+  .summary-chip-grid,
   .summary-grid--badges,
   .camera-help__grid,
   .export-grid {

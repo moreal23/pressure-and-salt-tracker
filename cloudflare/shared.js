@@ -92,6 +92,16 @@ export function parseSettingsPayload(body) {
   }
 }
 
+export function ensurePin(value, fieldName = 'PIN') {
+  const pin = ensureString(value, fieldName, 4, 8)
+
+  if (!/^\d{4,8}$/.test(pin)) {
+    throw new Error(`${fieldName} must be 4 to 8 digits.`)
+  }
+
+  return pin
+}
+
 export function parseBloodPressurePayload(body) {
   return {
     systolic: ensureNumber(body?.systolic, 'Systolic', 50, 280),
@@ -110,6 +120,17 @@ export function parseFoodLogPayload(body) {
     mealType: ensureString(body?.mealType ?? 'Meal', 'Meal type', 1, 40),
     barcode: ensureString(body?.barcode ?? '', 'Barcode', 0, 80),
     loggedAt: toIsoString(body?.loggedAt),
+  }
+}
+
+export function parseFavoriteFoodPayload(body) {
+  return {
+    foodName: ensureString(body?.foodName, 'Food name', 2, 180),
+    servingSize: ensureString(body?.servingSize, 'Serving size', 1, 120),
+    sodiumMg: ensureNumber(body?.sodiumMg, 'Sodium', 0, 10000),
+    mealType: ensureString(body?.mealType ?? 'Meal', 'Meal type', 1, 40),
+    barcode: ensureString(body?.barcode ?? '', 'Barcode', 0, 80),
+    notes: ensureString(body?.notes ?? '', 'Notes', 0, 300),
   }
 }
 

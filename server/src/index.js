@@ -1,7 +1,7 @@
 const express = require('express')
 const cors = require('cors')
 const { z } = require('zod')
-const { randomUUID } = require('node:crypto')
+const { createHash, randomUUID } = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const { attachId, createStore } = require('./storage')
@@ -52,6 +52,15 @@ const foodLogSchema = z.object({
   loggedAt: dateTimeInputSchema,
 })
 
+const favoriteFoodSchema = z.object({
+  foodName: z.string().min(2).max(180),
+  servingSize: z.string().min(1).max(120),
+  sodiumMg: z.number().int().min(0).max(10000),
+  mealType: z.string().min(1).max(40).default('Meal'),
+  barcode: z.string().max(80).optional().default(''),
+  notes: z.string().max(300).optional().default(''),
+})
+
 const importSchema = z.object({
   rawText: z.string().min(8).max(100000),
 })
@@ -80,13 +89,26 @@ const reminderSchema = z.object({
   notes: z.string().max(300).default(''),
 })
 
+const pinValueSchema = z.string().regex(/^\d{4,8}$/, 'PIN must be 4 to 8 digits.')
+
+const privacyPinSchema = z.object({
+  pin: pinValueSchema,
+  currentPin: pinValueSchema.optional(),
+})
+
+const privacyClearSchema = z.object({
+  currentPin: pinValueSchema,
+})
+
 const backupRestoreSchema = z.object({
   data: z.object({
     settings: z.object({
       sodiumGoalMg: z.number().int().min(500).max(10000),
+      privacyPinHash: z.string().optional(),
     }).optional(),
     bloodPressureLogs: z.array(z.any()).optional(),
     foodLogs: z.array(z.any()).optional(),
+    favoriteFoods: z.array(z.any()).optional(),
     medicationLogs: z.array(z.any()).optional(),
     reminders: z.array(z.any()).optional(),
     fitbit: z.any().optional(),
@@ -128,6 +150,10 @@ function buildFitbitFrontendRedirect(status, message = '') {
 
 function getFitbitAuthorizationHeader() {
   return `Basic ${Buffer.from(`${fitbitConfig.clientId}:${fitbitConfig.clientSecret}`).toString('base64')}`
+}
+
+function hashPrivacyPin(pin) {
+  return createHash('sha256').update(pin).digest('hex')
 }
 
 function buildFitbitAuthorizeUrl() {
@@ -671,6 +697,120 @@ app.get('/api/reminders', async (request, response, next) => {
   }
 })
 
+app.get('/api/favorite-foods', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    response.json({
+      favoriteFoods: await store.getFavoriteFoods(),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/favorite-foods', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const parsed = favoriteFoodSchema.parse(request.body)
+    const entry = await store.addFavoriteFood({
+      id: randomUUID(),
+      ...parsed,
+      barcode: parsed.barcode ?? '',
+      notes: parsed.notes ?? '',
+    })
+    response.status(201).json({ entry })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/favorite-foods/:id', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const deleted = await store.deleteFavoriteFood(request.params.id)
+
+    if (!deleted) {
+      response.status(404).json({ error: 'Favorite food not found.' })
+      return
+    }
+
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/privacy/status', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    response.json(await store.getPrivacyStatus())
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/privacy/set', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const parsed = privacyPinSchema.parse(request.body)
+    const privacyStatus = await store.getPrivacyStatus()
+
+    if (privacyStatus.pinEnabled) {
+      if (!parsed.currentPin) {
+        response.status(400).json({ error: 'Enter your current PIN to change it.' })
+        return
+      }
+
+      const verified = await store.verifyPrivacyPinHash(hashPrivacyPin(parsed.currentPin))
+
+      if (!verified) {
+        response.status(400).json({ error: 'The current PIN did not match.' })
+        return
+      }
+    }
+
+    await store.setPrivacyPinHash(hashPrivacyPin(parsed.pin))
+    response.status(201).json({ pinEnabled: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/privacy/verify', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const parsed = privacyPinSchema.pick({ pin: true }).parse(request.body)
+    const verified = await store.verifyPrivacyPinHash(hashPrivacyPin(parsed.pin))
+
+    if (!verified) {
+      response.status(401).json({ error: 'That PIN did not match.' })
+      return
+    }
+
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/privacy/clear', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const parsed = privacyClearSchema.parse(request.body)
+    const verified = await store.verifyPrivacyPinHash(hashPrivacyPin(parsed.currentPin))
+
+    if (!verified) {
+      response.status(401).json({ error: 'That PIN did not match.' })
+      return
+    }
+
+    await store.clearPrivacyPinHash()
+    response.json({ pinEnabled: false })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.post('/api/reminders', async (request, response, next) => {
   try {
     const parsed = reminderSchema.parse(request.body)
@@ -970,9 +1110,25 @@ app.post('/api/import/blood-pressure', async (request, response, next) => {
 app.get('/api/barcode/:barcode', async (request, response, next) => {
   try {
     const barcode = request.params.barcode.replace(/\D/g, '')
+    const store = await storePromise
 
     if (!barcode) {
       response.status(400).json({ error: 'A barcode is required.' })
+      return
+    }
+
+    const favoriteMatch = await store.findFavoriteFoodByBarcode(barcode)
+
+    if (favoriteMatch) {
+      response.json({
+        item: {
+          foodName: favoriteMatch.foodName,
+          servingSize: favoriteMatch.servingSize,
+          sodiumMg: favoriteMatch.sodiumMg,
+          barcode: favoriteMatch.barcode,
+          source: 'favorite',
+        },
+      })
       return
     }
 

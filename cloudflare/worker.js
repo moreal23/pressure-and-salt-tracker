@@ -9,11 +9,13 @@ import {
 } from './fitbit.js'
 import {
   errorResponse,
+  ensurePin,
   formatDuplicateKey,
   jsonResponse,
   lookupBarcode,
   parseBackupRestorePayload,
   parseBloodPressurePayload,
+  parseFavoriteFoodPayload,
   parseFoodLogPayload,
   parseGoalBadgePayload,
   parseImportPayload,
@@ -24,6 +26,12 @@ import {
   readJson,
   toIsoString,
 } from './shared.js'
+
+async function hashPrivacyPin(pin) {
+  const encoded = new TextEncoder().encode(pin)
+  const digest = await crypto.subtle.digest('SHA-256', encoded)
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
+}
 
 function getTelegramConfig(env) {
   return {
@@ -218,6 +226,83 @@ async function handleApiRequest(request, env) {
     }
 
     return jsonResponse({ ok: true })
+  }
+
+  if (pathname === '/api/favorite-foods' && method === 'GET') {
+    return jsonResponse({
+      favoriteFoods: await store.getFavoriteFoods(),
+    })
+  }
+
+  if (pathname === '/api/favorite-foods' && method === 'POST') {
+    const body = await readJson(request)
+    const entry = {
+      id: crypto.randomUUID(),
+      ...parseFavoriteFoodPayload(body),
+    }
+    return jsonResponse({ entry: await store.addFavoriteFood(entry) }, 201)
+  }
+
+  if (pathname.startsWith('/api/favorite-foods/') && method === 'DELETE') {
+    const id = pathname.split('/').pop()
+    const deleted = await store.deleteFavoriteFood(id)
+
+    if (!deleted) {
+      return errorResponse('Favorite food not found.', 404)
+    }
+
+    return jsonResponse({ ok: true })
+  }
+
+  if (pathname === '/api/privacy/status' && method === 'GET') {
+    return jsonResponse(await store.getPrivacyStatus())
+  }
+
+  if (pathname === '/api/privacy/set' && method === 'POST') {
+    const body = await readJson(request)
+    const pin = ensurePin(body?.pin, 'PIN')
+    const currentPin = body?.currentPin ? ensurePin(body.currentPin, 'Current PIN') : ''
+    const privacyStatus = await store.getPrivacyStatus()
+
+    if (privacyStatus.pinEnabled) {
+      if (!currentPin) {
+        return errorResponse('Enter your current PIN to change it.', 400)
+      }
+
+      const verified = await store.verifyPrivacyPinHash(await hashPrivacyPin(currentPin))
+
+      if (!verified) {
+        return errorResponse('The current PIN did not match.', 400)
+      }
+    }
+
+    await store.setPrivacyPinHash(await hashPrivacyPin(pin))
+    return jsonResponse({ pinEnabled: true }, 201)
+  }
+
+  if (pathname === '/api/privacy/verify' && method === 'POST') {
+    const body = await readJson(request)
+    const pin = ensurePin(body?.pin, 'PIN')
+    const verified = await store.verifyPrivacyPinHash(await hashPrivacyPin(pin))
+
+    if (!verified) {
+      return errorResponse('That PIN did not match.', 401)
+    }
+
+    return jsonResponse({ ok: true })
+  }
+
+  if (pathname === '/api/privacy/clear' && method === 'POST') {
+    const body = await readJson(request)
+    const currentPin = ensurePin(body?.currentPin, 'Current PIN')
+    const verified = await store.verifyPrivacyPinHash(await hashPrivacyPin(currentPin))
+
+    if (!verified) {
+      return errorResponse('That PIN did not match.', 401)
+    }
+
+    await store.clearPrivacyPinHash()
+    return jsonResponse({ pinEnabled: false })
   }
 
   if (pathname === '/api/telegram/status' && method === 'GET') {
@@ -464,6 +549,20 @@ async function handleApiRequest(request, env) {
 
     if (!barcode) {
       return errorResponse('A barcode is required.', 400)
+    }
+
+    const favoriteMatch = await store.findFavoriteFoodByBarcode(barcode)
+
+    if (favoriteMatch) {
+      return jsonResponse({
+        item: {
+          foodName: favoriteMatch.foodName,
+          servingSize: favoriteMatch.servingSize,
+          sodiumMg: favoriteMatch.sodiumMg,
+          barcode: favoriteMatch.barcode,
+          source: 'favorite',
+        },
+      })
     }
 
     const item = await lookupBarcode(barcode)

@@ -30,10 +30,31 @@ export class D1Store {
   }
 
   async ensureSetup() {
+    try {
+      await this.db.prepare("ALTER TABLE app_settings ADD COLUMN privacy_pin_hash TEXT NOT NULL DEFAULT ''").run()
+    } catch {
+      // The column already exists on upgraded databases.
+    }
+
     await this.db.prepare(
       `
         INSERT OR IGNORE INTO app_settings (id, sodium_goal_mg, updated_at)
         VALUES (1, 2300, CURRENT_TIMESTAMP)
+      `
+    ).run()
+
+    await this.db.prepare(
+      `
+        CREATE TABLE IF NOT EXISTS favorite_foods (
+          id TEXT PRIMARY KEY,
+          food_name TEXT NOT NULL,
+          serving_size TEXT NOT NULL,
+          sodium_mg INTEGER NOT NULL,
+          meal_type TEXT NOT NULL DEFAULT 'Meal',
+          barcode TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
       `
     ).run()
 
@@ -131,6 +152,19 @@ export class D1Store {
     }
   }
 
+  mapFavoriteFoodRow(row) {
+    return {
+      id: row.id,
+      foodName: row.foodName,
+      servingSize: row.servingSize,
+      sodiumMg: Number(row.sodiumMg),
+      mealType: row.mealType,
+      barcode: row.barcode ?? '',
+      notes: row.notes ?? '',
+      createdAt: row.createdAt,
+    }
+  }
+
   async getSettings() {
     await this.ensureSetup()
     const row = await this.db
@@ -140,6 +174,15 @@ export class D1Store {
     return {
       sodiumGoalMg: Number(row?.sodiumGoalMg ?? 2300),
     }
+  }
+
+  async getPrivacyPinHash() {
+    await this.ensureSetup()
+    const row = await this.db
+      .prepare('SELECT privacy_pin_hash AS privacyPinHash FROM app_settings WHERE id = 1')
+      .first()
+
+    return row?.privacyPinHash ?? ''
   }
 
   async updateSettings(nextSettings) {
@@ -200,6 +243,121 @@ export class D1Store {
       .all()
 
     return (result.results ?? []).map((row) => this.mapFoodRow(row))
+  }
+
+  async getFavoriteFoods() {
+    await this.ensureSetup()
+    const result = await this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            food_name AS foodName,
+            serving_size AS servingSize,
+            sodium_mg AS sodiumMg,
+            meal_type AS mealType,
+            barcode,
+            notes,
+            created_at AS createdAt
+          FROM favorite_foods
+          ORDER BY created_at DESC
+        `
+      )
+      .all()
+
+    return (result.results ?? []).map((row) => this.mapFavoriteFoodRow(row))
+  }
+
+  async addFavoriteFood(entry) {
+    await this.ensureSetup()
+    const createdAt = entry.createdAt ?? new Date().toISOString()
+    await this.db
+      .prepare(
+        `
+          INSERT INTO favorite_foods (id, food_name, serving_size, sodium_mg, meal_type, barcode, notes, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `
+      )
+      .bind(
+        entry.id,
+        entry.foodName,
+        entry.servingSize,
+        entry.sodiumMg,
+        entry.mealType,
+        entry.barcode ?? '',
+        entry.notes ?? '',
+        createdAt
+      )
+      .run()
+
+    return {
+      ...entry,
+      barcode: entry.barcode ?? '',
+      notes: entry.notes ?? '',
+      createdAt,
+    }
+  }
+
+  async deleteFavoriteFood(id) {
+    await this.ensureSetup()
+    const result = await this.db.prepare('DELETE FROM favorite_foods WHERE id = ?').bind(id).run()
+    return Number(result.meta?.changes ?? 0) > 0
+  }
+
+  async findFavoriteFoodByBarcode(barcode) {
+    await this.ensureSetup()
+    const row = await this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            food_name AS foodName,
+            serving_size AS servingSize,
+            sodium_mg AS sodiumMg,
+            meal_type AS mealType,
+            barcode,
+            notes,
+            created_at AS createdAt
+          FROM favorite_foods
+          WHERE barcode = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `
+      )
+      .bind(barcode)
+      .first()
+
+    return row ? this.mapFavoriteFoodRow(row) : null
+  }
+
+  async getPrivacyStatus() {
+    return {
+      pinEnabled: Boolean(await this.getPrivacyPinHash()),
+    }
+  }
+
+  async setPrivacyPinHash(hash) {
+    await this.ensureSetup()
+    await this.db
+      .prepare('UPDATE app_settings SET privacy_pin_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1')
+      .bind(hash)
+      .run()
+
+    return this.getPrivacyStatus()
+  }
+
+  async verifyPrivacyPinHash(hash) {
+    const savedHash = await this.getPrivacyPinHash()
+    return Boolean(savedHash) && savedHash === hash
+  }
+
+  async clearPrivacyPinHash() {
+    await this.ensureSetup()
+    await this.db
+      .prepare("UPDATE app_settings SET privacy_pin_hash = '', updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+      .run()
+
+    return this.getPrivacyStatus()
   }
 
   async addBloodPressureLog(entry) {
@@ -500,11 +658,13 @@ export class D1Store {
   }
 
   async getBackupData() {
-    const [settings, bloodPressureLogs, foodLogs, medicationLogs, reminders, fitbit, goalBadges] =
+    const [settings, privacyPinHash, bloodPressureLogs, foodLogs, favoriteFoods, medicationLogs, reminders, fitbit, goalBadges] =
       await Promise.all([
         this.getSettings(),
+        this.getPrivacyPinHash(),
         this.getBloodPressureLogs(),
         this.getFoodLogs(),
+        this.getFavoriteFoods(),
         this.getMedicationLogs(),
         this.getReminders(),
         this.getFitbitState(),
@@ -515,9 +675,13 @@ export class D1Store {
       exportedAt: new Date().toISOString(),
       version: 1,
       data: {
-        settings,
+        settings: {
+          ...settings,
+          privacyPinHash,
+        },
         bloodPressureLogs,
         foodLogs,
+        favoriteFoods,
         medicationLogs,
         reminders,
         fitbit: createBackupSafeFitbitState(fitbit),
@@ -531,6 +695,7 @@ export class D1Store {
     await this.db.batch([
       this.db.prepare('DELETE FROM blood_pressure_logs'),
       this.db.prepare('DELETE FROM food_logs'),
+      this.db.prepare('DELETE FROM favorite_foods'),
       this.db.prepare('DELETE FROM medication_logs'),
       this.db.prepare('DELETE FROM reminders'),
       this.db.prepare('DELETE FROM goal_badges'),
@@ -559,6 +724,19 @@ export class D1Store {
         mealType: entry.mealType,
         barcode: entry.barcode ?? '',
         loggedAt: entry.loggedAt,
+      })
+    }
+
+    for (const entry of backup.favoriteFoods ?? []) {
+      await this.addFavoriteFood({
+        id: entry.id,
+        foodName: entry.foodName,
+        servingSize: entry.servingSize,
+        sodiumMg: Number(entry.sodiumMg),
+        mealType: entry.mealType,
+        barcode: entry.barcode ?? '',
+        notes: entry.notes ?? '',
+        createdAt: entry.createdAt ?? null,
       })
     }
 
@@ -595,6 +773,7 @@ export class D1Store {
     }
 
     await this.saveFitbitState(createBackupSafeFitbitState(backup.fitbit))
+    await this.setPrivacyPinHash(backup.settings?.privacyPinHash ?? '')
     return this.getBackupData()
   }
 

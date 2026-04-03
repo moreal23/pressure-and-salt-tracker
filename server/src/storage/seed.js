@@ -15,6 +15,7 @@ function createSeedData() {
   return {
     settings: {
       sodiumGoalMg: 2300,
+      privacyPinHash: '',
     },
     bloodPressureLogs: [
       {
@@ -169,6 +170,18 @@ function createSeedData() {
         medicationName: 'Lisinopril',
         dosage: '10 mg',
         notes: 'Morning reminder',
+      },
+    ],
+    favoriteFoods: [
+      {
+        id: 'favorite-1',
+        foodName: 'Low sodium crackers',
+        servingSize: '5 crackers',
+        sodiumMg: 120,
+        mealType: 'Snack',
+        barcode: '',
+        notes: 'Easy low-sodium snack',
+        createdAt: withTime(daysAgo(2), 9, 0),
       },
     ],
     goalBadges: [],

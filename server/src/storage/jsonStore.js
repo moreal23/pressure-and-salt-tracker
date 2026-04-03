@@ -75,6 +75,15 @@ class JsonStore {
     if (!parsed.reminderDeliveries) {
       parsed.reminderDeliveries = []
     }
+    if (!parsed.favoriteFoods) {
+      parsed.favoriteFoods = []
+    }
+    if (!parsed.settings) {
+      parsed.settings = { sodiumGoalMg: 2300, privacyPinHash: '' }
+    }
+    if (!parsed.settings.privacyPinHash) {
+      parsed.settings.privacyPinHash = ''
+    }
     parsed.reminders = parsed.reminders.map((entry) => ({
       dosage: '',
       ...entry,
@@ -172,6 +181,84 @@ class JsonStore {
   async getFoodLogs() {
     const data = await this.readData()
     return [...data.foodLogs].sort((left, right) => new Date(right.loggedAt) - new Date(left.loggedAt))
+  }
+
+  async getFavoriteFoods() {
+    const data = await this.readData()
+    return [...data.favoriteFoods].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+  }
+
+  async addFavoriteFood(entry) {
+    const data = await this.readData()
+    const nextEntry = {
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      ...entry,
+    }
+    data.favoriteFoods.push(nextEntry)
+    await this.writeData(data)
+    return nextEntry
+  }
+
+  async deleteFavoriteFood(id) {
+    const data = await this.readData()
+    const nextFavorites = data.favoriteFoods.filter((entry) => entry.id !== id)
+
+    if (nextFavorites.length === data.favoriteFoods.length) {
+      return false
+    }
+
+    data.favoriteFoods = nextFavorites
+    await this.writeData(data)
+    return true
+  }
+
+  async findFavoriteFoodByBarcode(barcode) {
+    const normalizedBarcode = String(barcode ?? '').trim()
+
+    if (!normalizedBarcode) {
+      return null
+    }
+
+    const favorites = await this.getFavoriteFoods()
+    return favorites.find((entry) => String(entry.barcode ?? '').trim() === normalizedBarcode) ?? null
+  }
+
+  async getPrivacyStatus() {
+    const data = await this.readData()
+    return {
+      pinEnabled: Boolean(data.settings?.privacyPinHash),
+    }
+  }
+
+  async getPrivacyPinHash() {
+    const data = await this.readData()
+    return data.settings?.privacyPinHash ?? ''
+  }
+
+  async setPrivacyPinHash(hash) {
+    const data = await this.readData()
+    data.settings = {
+      ...data.settings,
+      privacyPinHash: hash,
+    }
+    await this.writeData(data)
+    return this.getPrivacyStatus()
+  }
+
+  async verifyPrivacyPinHash(hash) {
+    const savedHash = await this.getPrivacyPinHash()
+    return Boolean(savedHash) && savedHash === hash
+  }
+
+  async clearPrivacyPinHash() {
+    const data = await this.readData()
+    data.settings = {
+      ...data.settings,
+      privacyPinHash: '',
+    }
+    await this.writeData(data)
+    return this.getPrivacyStatus()
   }
 
   async getFitbitState() {
@@ -322,8 +409,14 @@ class JsonStore {
       foodLogs: backup.foodLogs ?? [],
       medicationLogs: backup.medicationLogs ?? [],
       reminders: backup.reminders ?? [],
+      favoriteFoods: backup.favoriteFoods ?? [],
       fitbit: createBackupSafeFitbitState(backup.fitbit),
       goalBadges: backup.goalBadges ?? [],
+    }
+
+    nextData.settings = {
+      sodiumGoalMg: nextData.settings.sodiumGoalMg ?? 2300,
+      privacyPinHash: nextData.settings.privacyPinHash ?? '',
     }
 
     await this.writeData(nextData)

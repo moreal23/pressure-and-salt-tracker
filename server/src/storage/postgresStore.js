@@ -46,6 +46,7 @@ class PostgresStore {
       CREATE TABLE IF NOT EXISTS app_settings (
         id INTEGER PRIMARY KEY DEFAULT 1,
         sodium_goal_mg INTEGER NOT NULL DEFAULT 2300,
+        privacy_pin_hash TEXT NOT NULL DEFAULT '',
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         CONSTRAINT single_settings_row CHECK (id = 1)
       );
@@ -67,6 +68,17 @@ class PostgresStore {
         meal_type TEXT NOT NULL DEFAULT 'Meal',
         barcode TEXT NOT NULL DEFAULT '',
         logged_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS favorite_foods (
+        id UUID PRIMARY KEY,
+        food_name TEXT NOT NULL,
+        serving_size TEXT NOT NULL,
+        sodium_mg INTEGER NOT NULL,
+        meal_type TEXT NOT NULL DEFAULT 'Meal',
+        barcode TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS fitbit_connection (
@@ -112,6 +124,9 @@ class PostgresStore {
       ALTER TABLE reminders
       ADD COLUMN IF NOT EXISTS dosage TEXT NOT NULL DEFAULT '';
 
+      ALTER TABLE app_settings
+      ADD COLUMN IF NOT EXISTS privacy_pin_hash TEXT NOT NULL DEFAULT '';
+
       CREATE TABLE IF NOT EXISTS reminder_deliveries (
         id UUID PRIMARY KEY,
         reminder_id TEXT NOT NULL,
@@ -132,6 +147,11 @@ class PostgresStore {
     return {
       sodiumGoalMg: result.rows[0]?.sodium_goal_mg ?? 2300,
     }
+  }
+
+  async getPrivacyPinHash() {
+    const result = await this.pool.query('SELECT privacy_pin_hash FROM app_settings WHERE id = 1')
+    return result.rows[0]?.privacy_pin_hash ?? ''
   }
 
   async getDashboard() {
@@ -234,6 +254,114 @@ class PostgresStore {
     )
 
     return result.rows
+  }
+
+  async getFavoriteFoods() {
+    const result = await this.pool.query(
+      `
+        SELECT
+          id,
+          food_name AS "foodName",
+          serving_size AS "servingSize",
+          sodium_mg AS "sodiumMg",
+          meal_type AS "mealType",
+          barcode,
+          notes,
+          created_at AS "createdAt"
+        FROM favorite_foods
+        ORDER BY created_at DESC
+      `
+    )
+
+    return result.rows
+  }
+
+  async addFavoriteFood(entry) {
+    const result = await this.pool.query(
+      `
+        INSERT INTO favorite_foods (id, food_name, serving_size, sodium_mg, meal_type, barcode, notes, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()))
+        RETURNING
+          id,
+          food_name AS "foodName",
+          serving_size AS "servingSize",
+          sodium_mg AS "sodiumMg",
+          meal_type AS "mealType",
+          barcode,
+          notes,
+          created_at AS "createdAt"
+      `,
+      [
+        entry.id,
+        entry.foodName,
+        entry.servingSize,
+        entry.sodiumMg,
+        entry.mealType,
+        entry.barcode ?? '',
+        entry.notes ?? '',
+        entry.createdAt ?? null,
+      ]
+    )
+
+    return result.rows[0]
+  }
+
+  async deleteFavoriteFood(id) {
+    const result = await this.pool.query('DELETE FROM favorite_foods WHERE id = $1', [id])
+    return result.rowCount > 0
+  }
+
+  async findFavoriteFoodByBarcode(barcode) {
+    const result = await this.pool.query(
+      `
+        SELECT
+          id,
+          food_name AS "foodName",
+          serving_size AS "servingSize",
+          sodium_mg AS "sodiumMg",
+          meal_type AS "mealType",
+          barcode,
+          notes,
+          created_at AS "createdAt"
+        FROM favorite_foods
+        WHERE barcode = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [barcode]
+    )
+
+    return result.rows[0] ?? null
+  }
+
+  async getPrivacyStatus() {
+    return {
+      pinEnabled: Boolean(await this.getPrivacyPinHash()),
+    }
+  }
+
+  async setPrivacyPinHash(hash) {
+    await this.pool.query(
+      `
+        INSERT INTO app_settings (id, sodium_goal_mg, privacy_pin_hash, updated_at)
+        VALUES (1, COALESCE((SELECT sodium_goal_mg FROM app_settings WHERE id = 1), 2300), $1, NOW())
+        ON CONFLICT (id)
+        DO UPDATE SET privacy_pin_hash = EXCLUDED.privacy_pin_hash, updated_at = NOW()
+      `,
+      [hash]
+    )
+
+    return this.getPrivacyStatus()
+  }
+
+  async verifyPrivacyPinHash(hash) {
+    const savedHash = await this.getPrivacyPinHash()
+    return Boolean(savedHash) && savedHash === hash
+  }
+
+  async clearPrivacyPinHash() {
+    await this.pool.query('UPDATE app_settings SET privacy_pin_hash = \'\', updated_at = NOW() WHERE id = 1')
+    return this.getPrivacyStatus()
   }
 
   async getFitbitState() {
@@ -433,11 +561,13 @@ class PostgresStore {
   }
 
   async getBackupData() {
-    const [settings, bloodPressureLogs, foodLogs, medicationLogs, reminders, fitbitState, goalBadges] =
+    const [settings, privacyPinHash, bloodPressureLogs, foodLogs, favoriteFoods, medicationLogs, reminders, fitbitState, goalBadges] =
       await Promise.all([
         this.getSettings(),
+        this.getPrivacyPinHash(),
         this.getBloodPressureLogs(),
         this.getFoodLogs(),
+        this.getFavoriteFoods(),
         this.getMedicationLogs(),
         this.getReminders(),
         this.getFitbitState(),
@@ -448,9 +578,13 @@ class PostgresStore {
       exportedAt: new Date().toISOString(),
       version: 1,
       data: {
-        settings,
+        settings: {
+          ...settings,
+          privacyPinHash,
+        },
         bloodPressureLogs,
         foodLogs,
+        favoriteFoods,
         medicationLogs,
         reminders,
         fitbit: createBackupSafeFitbitState(fitbitState),
@@ -466,6 +600,7 @@ class PostgresStore {
       await client.query('BEGIN')
       await client.query('DELETE FROM blood_pressure_logs')
       await client.query('DELETE FROM food_logs')
+      await client.query('DELETE FROM favorite_foods')
       await client.query('DELETE FROM medication_logs')
       await client.query('DELETE FROM reminders')
       await client.query('DELETE FROM goal_badges')
@@ -500,6 +635,25 @@ class PostgresStore {
             VALUES ($1, $2, $3, $4, $5, $6, $7)
           `,
           [entry.id, entry.foodName, entry.servingSize, entry.sodiumMg, entry.mealType, entry.barcode ?? '', entry.loggedAt]
+        )
+      }
+
+      for (const entry of backup.favoriteFoods ?? []) {
+        await client.query(
+          `
+            INSERT INTO favorite_foods (id, food_name, serving_size, sodium_mg, meal_type, barcode, notes, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()))
+          `,
+          [
+            entry.id,
+            entry.foodName,
+            entry.servingSize,
+            entry.sodiumMg,
+            entry.mealType,
+            entry.barcode ?? '',
+            entry.notes ?? '',
+            entry.createdAt ?? null,
+          ]
         )
       }
 
@@ -569,6 +723,11 @@ class PostgresStore {
           fitbit.connection?.profileName ?? '',
           JSON.stringify(fitbit.summary ?? null),
         ]
+      )
+
+      await client.query(
+        'UPDATE app_settings SET privacy_pin_hash = $1, updated_at = NOW() WHERE id = 1',
+        [backup.settings?.privacyPinHash ?? '']
       )
 
       await client.query('COMMIT')

@@ -53,6 +53,7 @@ const importExample = `date,time,systolic,diastolic,pulse,notes
 04/04/2026,7:40 AM,128,82,71,Before breakfast`
 const CELEBRATION_STEPS_GOAL = 15000
 const REMINDER_CHECK_INTERVAL_MS = 30_000
+const PRIVACY_UNLOCK_KEY = 'pressure-salt-unlocked'
 
 function formatImportDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -183,20 +184,56 @@ function buildReminderMedicationNote(reminder) {
   return `Taken from reminder: ${reminder.title} at ${reminder.timeOfDay}`
 }
 
-function findReminderMedicationLogToday(reminder, medicationLogs) {
-  const todayKey = getLocalDayKey()
+function getFoodChoiceKey(entry) {
+  return [
+    String(entry.foodName ?? '').trim().toLowerCase(),
+    String(entry.servingSize ?? '').trim().toLowerCase(),
+    String(entry.sodiumMg ?? ''),
+    String(entry.barcode ?? '').trim(),
+  ].join('|')
+}
+
+function getLocalTimeOfDayFromValue(value) {
+  const date = new Date(value)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function getCurrentWeekDates(now = new Date()) {
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  start.setDate(now.getDate() - now.getDay())
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const next = new Date(start)
+    next.setDate(start.getDate() + index)
+    return next
+  })
+}
+
+function findReminderMedicationLogForDay(reminder, medicationLogs, dayKey, usedLogIds = new Set()) {
   const targetMedication = getReminderMedicationName(reminder).toLowerCase()
   const targetNote = buildReminderMedicationNote(reminder)
-
-  return medicationLogs.find((entry) => {
-    if (getLocalDayKey(entry.takenAt) !== todayKey) {
+  const eligibleEntries = medicationLogs.filter((entry) => {
+    if (usedLogIds.has(entry.id) || getLocalDayKey(entry.takenAt) !== dayKey) {
       return false
     }
 
     const medicationMatches = String(entry.medicationName ?? '').trim().toLowerCase() === targetMedication
     const noteMatches = String(entry.notes ?? '').includes(targetNote)
-    return medicationMatches && noteMatches
+    return noteMatches || medicationMatches
   })
+
+  const exactNoteMatch = eligibleEntries.find((entry) => String(entry.notes ?? '').includes(targetNote))
+
+  if (exactNoteMatch) {
+    return exactNoteMatch
+  }
+
+  return eligibleEntries[0] ?? null
+}
+
+function findReminderMedicationLogToday(reminder, medicationLogs) {
+  return findReminderMedicationLogForDay(reminder, medicationLogs, getLocalDayKey())
 }
 
 function buildMedicationChecklist(reminders, medicationLogs, now = new Date()) {
@@ -247,6 +284,90 @@ function groupMedicationLogsByDay(medicationLogs) {
       dayKey,
       entries: [...entries].sort((left, right) => new Date(right.takenAt) - new Date(left.takenAt)),
     }))
+}
+
+function buildRecentFoodChoices(foodLogs) {
+  const seen = new Set()
+  const choices = []
+
+  for (const entry of foodLogs) {
+    const key = getFoodChoiceKey(entry)
+
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    choices.push(entry)
+
+    if (choices.length === 8) {
+      break
+    }
+  }
+
+  return choices
+}
+
+function buildWeeklyMedicationSummary(reminders, medicationLogs, now = new Date()) {
+  const medicationReminders = reminders
+    .filter((entry) => entry.enabled && entry.reminderType === 'medication')
+    .sort((left, right) => left.timeOfDay.localeCompare(right.timeOfDay))
+
+  if (!medicationReminders.length) {
+    return {
+      onTimeCount: 0,
+      lateCount: 0,
+      missedCount: 0,
+      completedCount: 0,
+      dueCount: 0,
+    }
+  }
+
+  const todayKey = getLocalDayKey(now)
+  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  const usedLogIds = new Set()
+  let onTimeCount = 0
+  let lateCount = 0
+  let missedCount = 0
+  let dueCount = 0
+
+  for (const date of getCurrentWeekDates(now)) {
+    const dayKey = getLocalDayKey(date)
+
+    if (dayKey > todayKey) {
+      continue
+    }
+
+    for (const reminder of medicationReminders) {
+      if (dayKey === todayKey && reminder.timeOfDay > currentTime) {
+        continue
+      }
+
+      dueCount += 1
+      const matchingLog = findReminderMedicationLogForDay(reminder, medicationLogs, dayKey, usedLogIds)
+
+      if (!matchingLog) {
+        missedCount += 1
+        continue
+      }
+
+      usedLogIds.add(matchingLog.id)
+
+      if (getLocalTimeOfDayFromValue(matchingLog.takenAt) > reminder.timeOfDay) {
+        lateCount += 1
+      } else {
+        onTimeCount += 1
+      }
+    }
+  }
+
+  return {
+    onTimeCount,
+    lateCount,
+    missedCount,
+    completedCount: onTimeCount + lateCount,
+    dueCount,
+  }
 }
 
 function escapeCsvCell(value) {
@@ -612,6 +733,300 @@ function TodayMedicationChecklistPanel({ checklist, onLogTaken, quickLogReminder
         <div className="import-hint">Add a medication reminder and it will appear in today&apos;s checklist.</div>
       )}
     </section>
+  )
+}
+
+function WeeklyMedicationSummaryPanel({ summary }) {
+  const adherencePercent = summary.dueCount
+    ? Math.round((summary.completedCount / summary.dueCount) * 100)
+    : 0
+
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Weekly Summary</p>
+          <h2>Missed-dose summary</h2>
+        </div>
+        <p className="panel-copy">This week&apos;s due medication reminders are grouped into on-time, late, and missed doses.</p>
+      </div>
+
+      <div className="summary-chip-grid">
+        <article className="summary-chip summary-chip--success">
+          <span>On time</span>
+          <strong>{summary.onTimeCount}</strong>
+        </article>
+        <article className="summary-chip summary-chip--warning">
+          <span>Logged late</span>
+          <strong>{summary.lateCount}</strong>
+        </article>
+        <article className="summary-chip summary-chip--danger">
+          <span>Missed</span>
+          <strong>{summary.missedCount}</strong>
+        </article>
+      </div>
+
+      <div className="import-hint">
+        {summary.dueCount
+          ? `${summary.completedCount} of ${summary.dueCount} due doses were logged this week. Adherence so far: ${adherencePercent}%.`
+          : 'Add a medication reminder to start building your weekly dose summary.'}
+      </div>
+    </section>
+  )
+}
+
+function QuickFoodsPanel({
+  favoriteFoods,
+  recentFoods,
+  favoriteKeys,
+  onUseFood,
+  onSaveFavorite,
+  onDeleteFavorite,
+  currentFoodCanBeSaved,
+  onSaveCurrentFood,
+  deletingId,
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Quick Foods</p>
+          <h2>Favorites and recent foods</h2>
+        </div>
+        <p className="panel-copy">
+          Reuse the foods you already trust so you can log a low-sodium meal without rescanning every time.
+        </p>
+      </div>
+
+      <div className="quick-food-actions">
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={onSaveCurrentFood}
+          disabled={!currentFoodCanBeSaved}
+        >
+          Save current food as favorite
+        </button>
+        <p className="panel-copy">
+          If a barcode item is not found, fill the food form once and save it here for faster lookup next time.
+        </p>
+      </div>
+
+      <div className="panel-subsection">
+        <h3>Favorite foods</h3>
+        <p className="panel-copy">Your saved foods stay ready with one tap, including any barcodes you saved manually.</p>
+      </div>
+
+      {favoriteFoods.length ? (
+        <ul className="activity-list">
+          {favoriteFoods.map((entry) => (
+            <li key={entry.id}>
+              <div className="history-main">
+                <div>
+                  <strong>
+                    {entry.foodName} <span>{entry.sodiumMg} mg</span>
+                  </strong>
+                  <small>{`${entry.mealType} | ${entry.servingSize}`}</small>
+                </div>
+                <div className="history-actions">
+                  <button className="button button--ghost" type="button" onClick={() => onUseFood(entry, 'favorite foods')}>
+                    Use
+                  </button>
+                  <button
+                    className="button button--danger"
+                    type="button"
+                    onClick={() => onDeleteFavorite(entry)}
+                    disabled={deletingId === entry.id}
+                  >
+                    {deletingId === entry.id ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+              {entry.barcode ? <p>Saved barcode: {entry.barcode}</p> : null}
+              {entry.notes ? <p>{entry.notes}</p> : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="import-hint">Save a favorite food and it will stay here for faster daily logging.</div>
+      )}
+
+      <div className="panel-subsection">
+        <h3>Recent foods</h3>
+        <p className="panel-copy">These are your latest unique foods from the log, ready to reuse.</p>
+      </div>
+
+      {recentFoods.length ? (
+        <ul className="activity-list">
+          {recentFoods.map((entry) => {
+            const alreadyFavorite = favoriteKeys.has(getFoodChoiceKey(entry))
+
+            return (
+              <li key={`${entry.id}-recent`}>
+                <div className="history-main">
+                  <div>
+                    <strong>
+                      {entry.foodName} <span>{entry.sodiumMg} mg</span>
+                    </strong>
+                    <small>{`${entry.mealType} | ${entry.servingSize}`}</small>
+                  </div>
+                  <div className="history-actions">
+                    <button className="button button--ghost" type="button" onClick={() => onUseFood(entry, 'recent foods')}>
+                      Use
+                    </button>
+                    <button
+                      className="button button--ghost"
+                      type="button"
+                      onClick={() => onSaveFavorite(entry)}
+                      disabled={alreadyFavorite}
+                    >
+                      {alreadyFavorite ? 'Saved' : 'Save favorite'}
+                    </button>
+                  </div>
+                </div>
+                {entry.barcode ? <p>Barcode: {entry.barcode}</p> : null}
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <div className="import-hint">Your recent food choices will show up here after you log a few meals.</div>
+      )}
+    </section>
+  )
+}
+
+function PrivacyPanel({ privacyState, setPrivacyState, onSavePin, onClearPin, onLockNow }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Privacy</p>
+          <h2>Simple app PIN lock</h2>
+        </div>
+        <p className="panel-copy">Add a 4 to 8 digit PIN so the dashboard stays private when someone opens the app on your phone.</p>
+      </div>
+
+      <div className="privacy-banner">
+        <strong>{privacyState.pinEnabled ? 'PIN lock is on' : 'PIN lock is off'}</strong>
+        <span>
+          {privacyState.pinEnabled
+            ? 'You can lock the app now, change the PIN, or turn the PIN off below.'
+            : 'Set a PIN below to require it whenever the app is reopened.'}
+        </span>
+      </div>
+
+      <form className="form-grid" onSubmit={onSavePin}>
+        {privacyState.pinEnabled ? (
+          <label>
+            <span>Current PIN</span>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="current-password"
+              value={privacyState.currentPin}
+              onChange={(event) =>
+                setPrivacyState((current) => ({
+                  ...current,
+                  currentPin: event.target.value,
+                  error: '',
+                  message: '',
+                }))
+              }
+            />
+          </label>
+        ) : null}
+        <label>
+          <span>{privacyState.pinEnabled ? 'New PIN' : 'PIN'}</span>
+          <input
+            type="password"
+            inputMode="numeric"
+            autoComplete="new-password"
+            value={privacyState.newPin}
+            onChange={(event) =>
+              setPrivacyState((current) => ({
+                ...current,
+                newPin: event.target.value,
+                error: '',
+                message: '',
+              }))
+            }
+            required
+          />
+        </label>
+        <label>
+          <span>Confirm PIN</span>
+          <input
+            type="password"
+            inputMode="numeric"
+            autoComplete="new-password"
+            value={privacyState.confirmPin}
+            onChange={(event) =>
+              setPrivacyState((current) => ({
+                ...current,
+                confirmPin: event.target.value,
+                error: '',
+                message: '',
+              }))
+            }
+            required
+          />
+        </label>
+        <div className="inline-form full-width">
+          <button className="button button--solid" type="submit" disabled={privacyState.busy === 'save'}>
+            {privacyState.busy === 'save' ? 'Saving PIN...' : privacyState.pinEnabled ? 'Change PIN' : 'Save PIN'}
+          </button>
+          {privacyState.pinEnabled ? (
+            <>
+              <button className="button button--ghost" type="button" onClick={onLockNow}>
+                Lock now
+              </button>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={onClearPin}
+                disabled={privacyState.busy === 'clear'}
+              >
+                {privacyState.busy === 'clear' ? 'Turning off...' : 'Turn off PIN'}
+              </button>
+            </>
+          ) : null}
+        </div>
+      </form>
+
+      {privacyState.message ? <p className="status status--ok">{privacyState.message}</p> : null}
+      {privacyState.error ? <p className="status status--error">{privacyState.error}</p> : null}
+    </section>
+  )
+}
+
+function PrivacyLockScreen({ unlockPin, setUnlockPin, onUnlock, busy, error }) {
+  return (
+    <main className="app-shell loading-shell">
+      <div className="loading-card privacy-lock-card">
+        <p className="eyebrow">Privacy Lock</p>
+        <h1>Enter your app PIN</h1>
+        <p>Your health dashboard is locked until you enter the PIN you saved for this app.</p>
+
+        <form className="simple-form" onSubmit={onUnlock}>
+          <label htmlFor="unlockPin">PIN</label>
+          <input
+            id="unlockPin"
+            type="password"
+            inputMode="numeric"
+            autoComplete="current-password"
+            value={unlockPin}
+            onChange={(event) => setUnlockPin(event.target.value)}
+            required
+          />
+          <button className="button button--solid" type="submit" disabled={busy}>
+            {busy ? 'Unlocking...' : 'Unlock app'}
+          </button>
+        </form>
+
+        {error ? <p className="status status--error">{error}</p> : null}
+      </div>
+    </main>
   )
 }
 
@@ -1273,7 +1688,10 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
       setLookupState({
         loading: false,
         error: '',
-        message: `Loaded ${result.item.foodName}. Review it below and save it to your day log.`,
+        message:
+          result.item.source === 'favorite'
+            ? `Loaded ${result.item.foodName} from your saved favorites. Review it below and save it to your day log.`
+            : `Loaded ${result.item.foodName}. Review it below and save it to your day log.`,
       })
     } catch (error) {
       setLookupState({
@@ -1601,6 +2019,19 @@ function App() {
   const [quickLogReminderId, setQuickLogReminderId] = useState('')
   const [fitbitBusy, setFitbitBusy] = useState(false)
   const [goalBadges, setGoalBadges] = useState([])
+  const [favoriteFoods, setFavoriteFoods] = useState([])
+  const [privacyState, setPrivacyState] = useState({
+    checking: true,
+    pinEnabled: false,
+    unlocked: false,
+    busy: '',
+    unlockPin: '',
+    currentPin: '',
+    newPin: '',
+    confirmPin: '',
+    error: '',
+    message: '',
+  })
   const playedBadgeDatesRef = useRef(new Set())
   const fitbitSyncInFlightRef = useRef(false)
   const lastAutoSyncAttemptRef = useRef(0)
@@ -1626,13 +2057,14 @@ function App() {
     }
 
     try {
-      const [dashboardData, historyData, fitbitData, celebrationsData, medicationData, reminderData] = await Promise.all([
+      const [dashboardData, historyData, fitbitData, celebrationsData, medicationData, reminderData, favoriteFoodData] = await Promise.all([
         fetchJson('/api/dashboard'),
         fetchJson('/api/history'),
         fetchJson('/api/fitbit/status'),
         fetchJson('/api/celebrations'),
         fetchJson('/api/medications'),
         fetchJson('/api/reminders'),
+        fetchJson('/api/favorite-foods'),
       ])
       setDashboard(dashboardData)
       setHistory(historyData)
@@ -1640,6 +2072,7 @@ function App() {
       setGoalBadges(celebrationsData.goalBadges ?? [])
       setMedicationLogs(medicationData.medicationLogs ?? [])
       setReminders(reminderData.reminders ?? [])
+      setFavoriteFoods(favoriteFoodData.favoriteFoods ?? [])
       setGoalValue(String(dashboardData.settings.sodiumGoalMg))
       setStatus({ loading: false, error: '' })
 
@@ -1665,7 +2098,40 @@ function App() {
   }
 
   useEffect(() => {
-    loadDashboard()
+    async function initializeApp() {
+      setStatus({ loading: true, error: '' })
+
+      try {
+        const privacyStatus = await fetchJson('/api/privacy/status')
+        const sessionUnlocked = window.sessionStorage.getItem(PRIVACY_UNLOCK_KEY) === 'true'
+        const unlocked = !privacyStatus.pinEnabled || sessionUnlocked
+
+        setPrivacyState((current) => ({
+          ...current,
+          checking: false,
+          pinEnabled: privacyStatus.pinEnabled,
+          unlocked,
+          error: '',
+        }))
+
+        if (unlocked) {
+          await loadDashboard({ silent: true })
+        } else {
+          setStatus({ loading: false, error: '' })
+        }
+      } catch (error) {
+        setPrivacyState((current) => ({
+          ...current,
+          checking: false,
+          pinEnabled: false,
+          unlocked: true,
+          error: '',
+        }))
+        setStatus({ loading: false, error: error.message })
+      }
+    }
+
+    initializeApp()
   }, [])
 
   useEffect(() => {
@@ -1769,6 +2235,20 @@ function App() {
     () => buildMedicationChecklist(reminders, medicationLogs),
     [reminders, medicationLogs]
   )
+  const weeklyMedicationSummary = useMemo(
+    () => buildWeeklyMedicationSummary(reminders, medicationLogs),
+    [reminders, medicationLogs]
+  )
+  const recentFoods = useMemo(() => buildRecentFoodChoices(history.foodLogs), [history.foodLogs])
+  const favoriteKeys = useMemo(
+    () => new Set(favoriteFoods.map((entry) => getFoodChoiceKey(entry))),
+    [favoriteFoods]
+  )
+  const currentFoodCanBeSaved =
+    Boolean(foodForm.foodName.trim()) &&
+    Boolean(foodForm.servingSize.trim()) &&
+    foodForm.sodiumMg !== '' &&
+    Number.isFinite(Number(foodForm.sodiumMg))
 
   useEffect(() => {
     if (!celebration || !dashboard) {
@@ -2019,6 +2499,72 @@ function App() {
     }
   }
 
+  function useFoodChoice(entry, sourceLabel = 'saved food') {
+    setFoodForm({
+      foodName: entry.foodName ?? '',
+      servingSize: entry.servingSize ?? '',
+      sodiumMg: entry.sodiumMg ? String(entry.sodiumMg) : '',
+      mealType: entry.mealType ?? 'Meal',
+      barcode: entry.barcode ?? '',
+      loggedAt: getLocalDateTimeValue(),
+    })
+    setLookupState({
+      loading: false,
+      error: '',
+      message: `Loaded ${entry.foodName} from your ${sourceLabel}. Review it below and save it when ready.`,
+    })
+  }
+
+  async function handleSaveFavoriteFood(entry = foodForm) {
+    const sodiumValue = Number(entry.sodiumMg)
+
+    if (!entry.foodName?.trim() || !entry.servingSize?.trim() || !Number.isFinite(sodiumValue)) {
+      setSavingState('Enter food name, serving size, and sodium before saving a favorite.')
+      return
+    }
+
+    setSavingState(`Saving ${entry.foodName} to favorites...`)
+
+    try {
+      await fetchJson('/api/favorite-foods', {
+        method: 'POST',
+        body: JSON.stringify({
+          foodName: entry.foodName,
+          servingSize: entry.servingSize,
+          sodiumMg: sodiumValue,
+          mealType: entry.mealType ?? 'Meal',
+          barcode: entry.barcode ?? '',
+          notes: entry.notes ?? '',
+        }),
+      })
+      await loadDashboard({ silent: true })
+      setSavingState(`${entry.foodName} saved to your favorites.`)
+    } catch (error) {
+      setSavingState(error.message)
+    }
+  }
+
+  async function handleDeleteFavoriteFood(entry) {
+    if (!window.confirm(`Delete favorite food "${entry.foodName}"?`)) {
+      return
+    }
+
+    setDeletingId(entry.id)
+    setSavingState('Deleting favorite food...')
+
+    try {
+      await fetchJson(`/api/favorite-foods/${entry.id}`, {
+        method: 'DELETE',
+      })
+      await loadDashboard({ silent: true })
+      setSavingState('Favorite food deleted.')
+    } catch (error) {
+      setSavingState(error.message)
+    } finally {
+      setDeletingId('')
+    }
+  }
+
   async function handleMedicationSubmit(event) {
     event.preventDefault()
     setSavingState('Saving medication log...')
@@ -2133,6 +2679,142 @@ function App() {
         ? 'Reminder notifications are enabled.'
         : 'Browser notifications are still blocked, so reminders will only show while the app is open.'
     )
+  }
+
+  async function handlePrivacyUnlock(event) {
+    event.preventDefault()
+    setPrivacyState((current) => ({
+      ...current,
+      busy: 'unlock',
+      error: '',
+      message: '',
+    }))
+
+    try {
+      await fetchJson('/api/privacy/verify', {
+        method: 'POST',
+        body: JSON.stringify({
+          pin: privacyState.unlockPin,
+        }),
+      })
+
+      window.sessionStorage.setItem(PRIVACY_UNLOCK_KEY, 'true')
+      setPrivacyState((current) => ({
+        ...current,
+        unlocked: true,
+        busy: '',
+        unlockPin: '',
+        error: '',
+      }))
+      await loadDashboard({ silent: true })
+    } catch (error) {
+      setPrivacyState((current) => ({
+        ...current,
+        busy: '',
+        error: error.message,
+      }))
+    }
+  }
+
+  async function handlePrivacySave(event) {
+    event.preventDefault()
+
+    if (privacyState.newPin !== privacyState.confirmPin) {
+      setPrivacyState((current) => ({
+        ...current,
+        error: 'The new PIN and confirmation do not match.',
+        message: '',
+      }))
+      return
+    }
+
+    setPrivacyState((current) => ({
+      ...current,
+      busy: 'save',
+      error: '',
+      message: '',
+    }))
+
+    try {
+      await fetchJson('/api/privacy/set', {
+        method: 'POST',
+        body: JSON.stringify({
+          pin: privacyState.newPin,
+          currentPin: privacyState.pinEnabled ? privacyState.currentPin : undefined,
+        }),
+      })
+
+      window.sessionStorage.setItem(PRIVACY_UNLOCK_KEY, 'true')
+      setPrivacyState((current) => ({
+        ...current,
+        pinEnabled: true,
+        unlocked: true,
+        busy: '',
+        currentPin: '',
+        newPin: '',
+        confirmPin: '',
+        error: '',
+        message: current.pinEnabled ? 'PIN changed successfully.' : 'PIN lock is now turned on.',
+      }))
+    } catch (error) {
+      setPrivacyState((current) => ({
+        ...current,
+        busy: '',
+        error: error.message,
+      }))
+    }
+  }
+
+  async function handlePrivacyClear() {
+    if (!privacyState.pinEnabled) {
+      return
+    }
+
+    setPrivacyState((current) => ({
+      ...current,
+      busy: 'clear',
+      error: '',
+      message: '',
+    }))
+
+    try {
+      await fetchJson('/api/privacy/clear', {
+        method: 'POST',
+        body: JSON.stringify({
+          currentPin: privacyState.currentPin,
+        }),
+      })
+
+      window.sessionStorage.removeItem(PRIVACY_UNLOCK_KEY)
+      setPrivacyState((current) => ({
+        ...current,
+        pinEnabled: false,
+        unlocked: true,
+        busy: '',
+        currentPin: '',
+        newPin: '',
+        confirmPin: '',
+        error: '',
+        message: 'PIN lock is turned off.',
+      }))
+    } catch (error) {
+      setPrivacyState((current) => ({
+        ...current,
+        busy: '',
+        error: error.message,
+      }))
+    }
+  }
+
+  function handlePrivacyLockNow() {
+    window.sessionStorage.removeItem(PRIVACY_UNLOCK_KEY)
+    setPrivacyState((current) => ({
+      ...current,
+      unlocked: false,
+      unlockPin: '',
+      error: '',
+      message: '',
+    }))
   }
 
   function handleExportBloodPressureCsv() {
@@ -2455,9 +3137,13 @@ function App() {
       barcode: item.barcode ?? '',
       loggedAt: getLocalDateTimeValue(),
     })
+
+    if (item.source === 'favorite') {
+      setSavingState(`Loaded ${item.foodName} from your saved favorite foods.`)
+    }
   }
 
-  if (status.loading) {
+  if (privacyState.checking || (privacyState.unlocked && status.loading)) {
     return (
       <main className="app-shell loading-shell">
         <div className="loading-card">
@@ -2466,6 +3152,24 @@ function App() {
           <p>Starting the dashboard, recent logs, and sodium summary.</p>
         </div>
       </main>
+    )
+  }
+
+  if (!privacyState.unlocked) {
+    return (
+      <PrivacyLockScreen
+        unlockPin={privacyState.unlockPin}
+        setUnlockPin={(value) =>
+          setPrivacyState((current) => ({
+            ...current,
+            unlockPin: value,
+            error: '',
+          }))
+        }
+        onUnlock={handlePrivacyUnlock}
+        busy={privacyState.busy === 'unlock'}
+        error={privacyState.error}
+      />
     )
   }
 
@@ -2639,6 +3343,14 @@ function App() {
               </div>
             </form>
           </section>
+
+          <PrivacyPanel
+            privacyState={privacyState}
+            setPrivacyState={setPrivacyState}
+            onSavePin={handlePrivacySave}
+            onClearPin={handlePrivacyClear}
+            onLockNow={handlePrivacyLockNow}
+          />
 
           <FitbitPanel
             fitbit={fitbit}
@@ -2829,6 +3541,20 @@ function App() {
               </button>
             </form>
 
+            <div className="quick-food-actions quick-food-actions--form">
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() => handleSaveFavoriteFood()}
+                disabled={!currentFoodCanBeSaved}
+              >
+                Save current food as favorite
+              </button>
+              <p className="panel-copy">
+                Useful when a packaged food is not found. Save it once with its barcode and the app can reuse it later.
+              </p>
+            </div>
+
             {foodAssessment ? (
               <div className="food-check">
                 <div className={`food-check__card food-check__card--${foodAssessment.itemTone}`}>
@@ -2959,6 +3685,20 @@ function App() {
             checklist={medicationChecklist}
             onLogTaken={handleReminderTaken}
             quickLogReminderId={quickLogReminderId}
+          />
+
+          <WeeklyMedicationSummaryPanel summary={weeklyMedicationSummary} />
+
+          <QuickFoodsPanel
+            favoriteFoods={favoriteFoods}
+            recentFoods={recentFoods}
+            favoriteKeys={favoriteKeys}
+            onUseFood={useFoodChoice}
+            onSaveFavorite={handleSaveFavoriteFood}
+            onDeleteFavorite={handleDeleteFavoriteFood}
+            currentFoodCanBeSaved={currentFoodCanBeSaved}
+            onSaveCurrentFood={() => handleSaveFavoriteFood()}
+            deletingId={deletingId}
           />
 
           <ScannerPanel
