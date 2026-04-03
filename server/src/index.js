@@ -141,6 +141,7 @@ const fitbitConfig = {
 
 const SESSION_COOKIE_NAME = 'pressure_salt_session'
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+const PASSWORD_HASH_ITERATIONS = 100000
 
 function isFitbitConfigured() {
   return Boolean(fitbitConfig.clientId && fitbitConfig.clientSecret && fitbitConfig.redirectUri)
@@ -166,7 +167,7 @@ function hashPrivacyPin(pin) {
 }
 
 function hashPassword(password, salt) {
-  return pbkdf2Sync(password, salt, 120000, 32, 'sha256').toString('hex')
+  return pbkdf2Sync(password, salt, PASSWORD_HASH_ITERATIONS, 32, 'sha256').toString('hex')
 }
 
 function parseCookies(headerValue = '') {

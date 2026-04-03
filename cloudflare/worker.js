@@ -29,6 +29,7 @@ import {
 
 const SESSION_COOKIE_NAME = 'pressure_salt_session'
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+const PASSWORD_HASH_ITERATIONS = 100000
 
 function parseCookies(headerValue = '') {
   return Object.fromEntries(
@@ -78,7 +79,7 @@ async function hashPassword(password, salt) {
     {
       name: 'PBKDF2',
       salt: encoder.encode(salt),
-      iterations: 120000,
+      iterations: PASSWORD_HASH_ITERATIONS,
       hash: 'SHA-256',
     },
     baseKey,
