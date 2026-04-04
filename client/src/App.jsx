@@ -64,6 +64,13 @@ const REMINDER_CHECK_INTERVAL_MS = 30_000
 const AUTO_LOCK_AFTER_MS = 5 * 60_000
 const PRIVACY_UNLOCK_KEY = 'pressure-salt-unlocked'
 const THEME_STORAGE_KEY = 'pressure-salt-theme'
+const REPORT_RANGE_OPTIONS = [
+  { value: '7', label: 'Last 7 days' },
+  { value: '30', label: 'Last 30 days' },
+  { value: '90', label: 'Last 90 days' },
+  { value: 'all', label: 'All data' },
+  { value: 'custom', label: 'Custom range' },
+]
 
 function getInitialThemeMode() {
   if (typeof window === 'undefined') {
@@ -227,6 +234,95 @@ function getCurrentWeekDates(now = new Date()) {
     next.setDate(start.getDate() + index)
     return next
   })
+}
+
+function getLocalNoonDate(value = new Date()) {
+  const date = new Date(value)
+  date.setHours(12, 0, 0, 0)
+  return date
+}
+
+function shiftLocalDayKey(dayKey, offsetDays) {
+  const date = getLocalNoonDate(`${dayKey}T12:00:00`)
+  date.setDate(date.getDate() + offsetDays)
+  return getLocalDayKey(date)
+}
+
+function listDayKeysInRange(startKey, endKey) {
+  const start = getLocalNoonDate(`${startKey}T12:00:00`)
+  const end = getLocalNoonDate(`${endKey}T12:00:00`)
+  const dayKeys = []
+
+  for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    dayKeys.push(getLocalDayKey(cursor))
+  }
+
+  return dayKeys
+}
+
+function getRangeLabel(startKey, endKey, preset) {
+  if (preset === 'all') {
+    return 'All saved data'
+  }
+
+  if (startKey === endKey) {
+    return formatDateOnly(`${startKey}T12:00:00`)
+  }
+
+  return `${formatDateOnly(`${startKey}T12:00:00`)} to ${formatDateOnly(`${endKey}T12:00:00`)}`
+}
+
+function buildReportRange(preset, customStartKey, customEndKey, dataDayKeys = []) {
+  const todayKey = getLocalDayKey(getLocalNoonDate())
+
+  if (preset === 'all') {
+    const sortedKeys = [...dataDayKeys].filter(Boolean).sort()
+    const startKey = sortedKeys[0] ?? todayKey
+    const endKey = sortedKeys[sortedKeys.length - 1] ?? todayKey
+
+    return {
+      startKey,
+      endKey,
+      label: getRangeLabel(startKey, endKey, 'all'),
+    }
+  }
+
+  if (preset === 'custom') {
+    const fallbackStart = customStartKey || customEndKey || todayKey
+    const fallbackEnd = customEndKey || customStartKey || todayKey
+    const startKey = fallbackStart <= fallbackEnd ? fallbackStart : fallbackEnd
+    const endKey = fallbackStart <= fallbackEnd ? fallbackEnd : fallbackStart
+
+    return {
+      startKey,
+      endKey,
+      label: getRangeLabel(startKey, endKey, 'custom'),
+    }
+  }
+
+  const dayCount = Math.max(1, Number(preset) || 30)
+  const startKey = shiftLocalDayKey(todayKey, -(dayCount - 1))
+
+  return {
+    startKey,
+    endKey: todayKey,
+    label: getRangeLabel(startKey, todayKey, preset),
+  }
+}
+
+function filterEntriesByDayRange(entries, dateField, range) {
+  return entries.filter((entry) => {
+    const dayKey = getLocalDayKey(entry[dateField])
+    return dayKey >= range.startKey && dayKey <= range.endKey
+  })
+}
+
+function getAverage(values) {
+  if (!values.length) {
+    return 0
+  }
+
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
 }
 
 function findReminderMedicationLogForDay(reminder, medicationLogs, dayKey, usedLogIds = new Set()) {
@@ -395,6 +491,18 @@ function buildFitbitChartData(history = [], summary = null) {
 }
 
 function buildWeeklyMedicationSummary(reminders, medicationLogs, now = new Date()) {
+  return buildMedicationSummaryForRange(
+    reminders,
+    medicationLogs,
+    {
+      startKey: getLocalDayKey(getCurrentWeekDates(now)[0]),
+      endKey: getLocalDayKey(now),
+    },
+    now
+  )
+}
+
+function buildMedicationSummaryForRange(reminders, medicationLogs, range, now = new Date()) {
   const medicationReminders = reminders
     .filter((entry) => entry.enabled && entry.reminderType === 'medication')
     .sort((left, right) => left.timeOfDay.localeCompare(right.timeOfDay))
@@ -417,9 +525,7 @@ function buildWeeklyMedicationSummary(reminders, medicationLogs, now = new Date(
   let missedCount = 0
   let dueCount = 0
 
-  for (const date of getCurrentWeekDates(now)) {
-    const dayKey = getLocalDayKey(date)
-
+  for (const dayKey of listDayKeysInRange(range.startKey, range.endKey)) {
     if (dayKey > todayKey) {
       continue
     }
@@ -460,21 +566,24 @@ function buildMedicationSupplySummary(entry) {
   const tabletsRemaining = Number(entry.tabletsRemaining ?? 0)
   const tabletsPerDose = Math.max(1, Number(entry.tabletsPerDose ?? 1))
   const lowThreshold = Number(entry.lowThreshold ?? 14)
-  const estimatedDaysLeft = Math.floor(tabletsRemaining / tabletsPerDose)
+  const estimatedDaysLeft = Math.max(0, Math.floor(tabletsRemaining / tabletsPerDose))
+  const refillDayKey = shiftLocalDayKey(getLocalDayKey(), Math.max(estimatedDaysLeft - 1, 0))
+  const refillDateLabel = formatDateOnly(`${refillDayKey}T12:00:00`)
 
   let tone = 'good'
-  let message = `About ${estimatedDaysLeft} day${estimatedDaysLeft === 1 ? '' : 's'} left at ${tabletsPerDose} tablet${tabletsPerDose === 1 ? '' : 's'} per dose.`
+  let message = `About ${estimatedDaysLeft} day${estimatedDaysLeft === 1 ? '' : 's'} left at ${tabletsPerDose} tablet${tabletsPerDose === 1 ? '' : 's'} per dose. Refill around ${refillDateLabel}.`
 
   if (tabletsRemaining <= 0) {
     tone = 'danger'
     message = 'You are out of this medicine and may need a refill right away.'
   } else if (tabletsRemaining <= lowThreshold) {
     tone = 'warning'
-    message = `Low supply: only ${tabletsRemaining} tablet${tabletsRemaining === 1 ? '' : 's'} left.`
+    message = `Low supply: only ${tabletsRemaining} tablet${tabletsRemaining === 1 ? '' : 's'} left, about ${estimatedDaysLeft} day${estimatedDaysLeft === 1 ? '' : 's'} remaining.`
   }
 
   return {
     estimatedDaysLeft,
+    refillDateLabel,
     tone,
     message,
   }
@@ -1665,7 +1774,21 @@ function RemindersPanel({
   )
 }
 
-function ExportPanel({ onPrintReport, onExportBloodPressureCsv, onExportMedicationCsv, onBackupExport, onBackupImport }) {
+function ExportPanel({
+  reportRangePreset,
+  setReportRangePreset,
+  reportStartDate,
+  setReportStartDate,
+  reportEndDate,
+  setReportEndDate,
+  reportRangeLabel,
+  reportSnapshot,
+  onPrintReport,
+  onExportBloodPressureCsv,
+  onExportMedicationCsv,
+  onBackupExport,
+  onBackupImport,
+}) {
   return (
     <section className="panel">
       <div className="panel-heading">
@@ -1676,9 +1799,67 @@ function ExportPanel({ onPrintReport, onExportBloodPressureCsv, onExportMedicati
         <p className="panel-copy">Create a doctor-friendly report or save data for Excel and backup.</p>
       </div>
 
+      <div className="report-range-card">
+        <div className="history-main">
+          <div>
+            <strong>Doctor report range</strong>
+            <span>{reportRangeLabel}</span>
+          </div>
+        </div>
+
+        <div className="report-range-grid">
+          <label>
+            <span>Date range</span>
+            <select value={reportRangePreset} onChange={(event) => setReportRangePreset(event.target.value)}>
+              {REPORT_RANGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {reportRangePreset === 'custom' ? (
+            <>
+              <label>
+                <span>Start date</span>
+                <input
+                  type="date"
+                  value={reportStartDate}
+                  onChange={(event) => setReportStartDate(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>End date</span>
+                <input
+                  type="date"
+                  value={reportEndDate}
+                  onChange={(event) => setReportEndDate(event.target.value)}
+                />
+              </label>
+            </>
+          ) : null}
+        </div>
+
+        <div className="summary-chip-grid report-summary-grid">
+          <article className="summary-chip">
+            <span>Blood pressure readings</span>
+            <strong>{reportSnapshot.bpCount}</strong>
+          </article>
+          <article className="summary-chip">
+            <span>Food logs</span>
+            <strong>{reportSnapshot.foodCount}</strong>
+          </article>
+          <article className="summary-chip">
+            <span>Medication logs</span>
+            <strong>{reportSnapshot.medicationCount}</strong>
+          </article>
+        </div>
+      </div>
+
       <div className="export-grid">
         <button className="button button--solid" type="button" onClick={onPrintReport}>
-          Print or Save PDF
+          Print doctor report
         </button>
         <button className="button button--ghost" type="button" onClick={onExportBloodPressureCsv}>
           Export BP CSV
@@ -2499,6 +2680,9 @@ function App() {
   const [fitbitBusy, setFitbitBusy] = useState(false)
   const [goalBadges, setGoalBadges] = useState([])
   const [favoriteFoods, setFavoriteFoods] = useState([])
+  const [reportRangePreset, setReportRangePreset] = useState('30')
+  const [reportStartDate, setReportStartDate] = useState(() => shiftLocalDayKey(getLocalDayKey(), -29))
+  const [reportEndDate, setReportEndDate] = useState(() => getLocalDayKey())
   const [privacyState, setPrivacyState] = useState({
     checking: true,
     pinEnabled: false,
@@ -2756,6 +2940,61 @@ function App() {
     () => buildFitbitChartData(fitbit.history, fitbit.summary),
     [fitbit.history, fitbit.summary]
   )
+  const reportRange = useMemo(() => {
+    const dataDayKeys = [
+      ...history.bloodPressureLogs.map((entry) => getLocalDayKey(entry.recordedAt)),
+      ...history.foodLogs.map((entry) => getLocalDayKey(entry.loggedAt)),
+      ...medicationLogs.map((entry) => getLocalDayKey(entry.takenAt)),
+      ...fitbit.history.map((entry) => entry.date),
+      fitbit.summary?.lastSyncAt ? getLocalDayKey(fitbit.summary.lastSyncAt) : null,
+    ]
+
+    return buildReportRange(reportRangePreset, reportStartDate, reportEndDate, dataDayKeys)
+  }, [fitbit.history, fitbit.summary?.lastSyncAt, history.bloodPressureLogs, history.foodLogs, medicationLogs, reportEndDate, reportRangePreset, reportStartDate])
+  const reportBloodPressureLogs = useMemo(
+    () => filterEntriesByDayRange(history.bloodPressureLogs, 'recordedAt', reportRange),
+    [history.bloodPressureLogs, reportRange]
+  )
+  const reportFoodLogs = useMemo(
+    () => filterEntriesByDayRange(history.foodLogs, 'loggedAt', reportRange),
+    [history.foodLogs, reportRange]
+  )
+  const reportMedicationLogs = useMemo(
+    () => filterEntriesByDayRange(medicationLogs, 'takenAt', reportRange),
+    [medicationLogs, reportRange]
+  )
+  const reportFitbitHistory = useMemo(() => {
+    const historyItems = buildFitbitChartData(fitbit.history, fitbit.summary)
+    return historyItems.filter((entry) => entry.date >= reportRange.startKey && entry.date <= reportRange.endKey)
+  }, [fitbit.history, fitbit.summary, reportRange])
+  const reportMedicationSummary = useMemo(
+    () => buildMedicationSummaryForRange(reminders, medicationLogs, reportRange),
+    [medicationLogs, reminders, reportRange]
+  )
+  const reportSnapshot = useMemo(() => {
+    const averageSystolic = getAverage(reportBloodPressureLogs.map((entry) => entry.systolic))
+    const averageDiastolic = getAverage(reportBloodPressureLogs.map((entry) => entry.diastolic))
+    const averagePulse = getAverage(reportBloodPressureLogs.map((entry) => entry.pulse))
+    const totalSodium = reportFoodLogs.reduce((sum, entry) => sum + Number(entry.sodiumMg ?? 0), 0)
+    const uniqueFoodDays = new Set(reportFoodLogs.map((entry) => getLocalDayKey(entry.loggedAt))).size
+    const averageDailySodium = uniqueFoodDays ? Math.round(totalSodium / uniqueFoodDays) : 0
+    const averageSteps = getAverage(reportFitbitHistory.map((entry) => Number(entry.stepsToday ?? 0)))
+    const averageSleepMinutes = getAverage(reportFitbitHistory.map((entry) => Number(entry.sleepMinutes ?? 0)))
+
+    return {
+      bpCount: reportBloodPressureLogs.length,
+      foodCount: reportFoodLogs.length,
+      medicationCount: reportMedicationLogs.length,
+      averageSystolic,
+      averageDiastolic,
+      averagePulse,
+      totalSodium,
+      averageDailySodium,
+      averageSteps,
+      averageSleepMinutes,
+      latestBloodPressure: reportBloodPressureLogs[0] ?? null,
+    }
+  }, [reportBloodPressureLogs, reportFitbitHistory, reportFoodLogs, reportMedicationLogs])
   const syncStatusItems = useMemo(
     () => [
       {
@@ -3556,7 +3795,7 @@ function App() {
 
   function handleExportBloodPressureCsv() {
     const csv = buildCsv(
-      history.bloodPressureLogs.map((entry) => ({
+      reportBloodPressureLogs.map((entry) => ({
         recordedAt: entry.recordedAt,
         systolic: entry.systolic,
         diastolic: entry.diastolic,
@@ -3565,12 +3804,12 @@ function App() {
       })),
       ['recordedAt', 'systolic', 'diastolic', 'pulse', 'notes']
     )
-    downloadFile(`blood-pressure-${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8')
+    downloadFile(`blood-pressure-${reportRange.startKey}-to-${reportRange.endKey}.csv`, csv, 'text/csv;charset=utf-8')
   }
 
   function handleExportMedicationCsv() {
     const csv = buildCsv(
-      medicationLogs.map((entry) => ({
+      reportMedicationLogs.map((entry) => ({
         takenAt: entry.takenAt,
         medicationName: entry.medicationName,
         dosage: entry.dosage,
@@ -3578,7 +3817,7 @@ function App() {
       })),
       ['takenAt', 'medicationName', 'dosage', 'notes']
     )
-    downloadFile(`medication-log-${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8')
+    downloadFile(`medication-log-${reportRange.startKey}-to-${reportRange.endKey}.csv`, csv, 'text/csv;charset=utf-8')
   }
 
   function handlePrintReport() {
@@ -3589,41 +3828,92 @@ function App() {
       return
     }
 
-    const medicationList = medicationLogs
-      .slice(0, 12)
+    const medicationList = reportMedicationLogs
+      .slice(0, 16)
       .map((entry) => `<li>${formatDateTime(entry.takenAt)} - ${entry.medicationName} ${entry.dosage}</li>`)
       .join('')
-    const bpList = history.bloodPressureLogs
-      .slice(0, 12)
+    const bpList = reportBloodPressureLogs
+      .slice(0, 16)
       .map((entry) => `<li>${formatDateTime(entry.recordedAt)} - ${entry.systolic}/${entry.diastolic}, pulse ${entry.pulse}</li>`)
       .join('')
-    const foodList = history.foodLogs
-      .slice(0, 12)
+    const foodList = reportFoodLogs
+      .slice(0, 16)
       .map((entry) => `<li>${formatDateTime(entry.loggedAt)} - ${entry.foodName} (${entry.sodiumMg} mg)</li>`)
+      .join('')
+    const supplyList = medicationSupplies
+      .map((entry) => {
+        const summary = buildMedicationSupplySummary(entry)
+        return `<li>${entry.medicationName} - ${entry.tabletsRemaining} tablets left, about ${summary.estimatedDaysLeft} day${summary.estimatedDaysLeft === 1 ? '' : 's'} left, refill around ${summary.refillDateLabel}</li>`
+      })
+      .join('')
+    const fitbitList = reportFitbitHistory
+      .slice(-10)
+      .map(
+        (entry) =>
+          `<li>${formatDay(entry.date)} - ${Number(entry.stepsToday ?? 0).toLocaleString()} steps, ${Number(entry.sleepMinutes ?? 0)} min sleep, heart rate ${entry.heartRate ?? '--'}</li>`
+      )
       .join('')
 
     reportWindow.document.write(`
       <html>
         <head>
-          <title>Health Tracking Report</title>
+          <title>Doctor Report</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 24px; color: #203030; }
-            h1, h2 { margin-bottom: 8px; }
-            section { margin-bottom: 24px; }
+            body { font-family: 'Segoe UI', Arial, sans-serif; padding: 28px; color: #1c2931; }
+            h1, h2, h3 { margin-bottom: 8px; }
+            section { margin-bottom: 24px; page-break-inside: avoid; }
             ul { padding-left: 20px; }
+            .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+            .card { padding: 14px 16px; border: 1px solid #d5e2ea; border-radius: 14px; background: #f8fbfd; }
+            .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: #4b6a78; }
+            .value { font-size: 24px; font-weight: 700; margin-top: 6px; }
+            .muted { color: #5e7885; }
           </style>
         </head>
         <body>
-          <h1>Blood Pressure and Sodium Report</h1>
+          <h1>PressureSalt Doctor Report</h1>
           <p>Generated ${new Date().toLocaleString()}</p>
+          <p>Report range: ${reportRange.label}</p>
           <section>
-            <h2>Today</h2>
-            <p>Sodium: ${dashboard.today.sodiumTotalMg} / ${dashboard.settings.sodiumGoalMg} mg</p>
-            <p>Steps: ${(fitbit.summary?.stepsToday ?? 0).toLocaleString()}</p>
+            <h2>Summary</h2>
+            <div class="summary-grid">
+              <div class="card">
+                <div class="label">Blood pressure average</div>
+                <div class="value">${reportSnapshot.averageSystolic || '--'}/${reportSnapshot.averageDiastolic || '--'}</div>
+                <div class="muted">${reportSnapshot.bpCount} reading(s) in range</div>
+              </div>
+              <div class="card">
+                <div class="label">Average pulse</div>
+                <div class="value">${reportSnapshot.averagePulse || '--'}</div>
+                <div class="muted">Latest: ${reportSnapshot.latestBloodPressure ? formatDateTime(reportSnapshot.latestBloodPressure.recordedAt) : 'No reading in range'}</div>
+              </div>
+              <div class="card">
+                <div class="label">Sodium</div>
+                <div class="value">${reportSnapshot.averageDailySodium.toLocaleString()} mg</div>
+                <div class="muted">Average daily sodium, ${reportSnapshot.totalSodium.toLocaleString()} mg total</div>
+              </div>
+              <div class="card">
+                <div class="label">Medication adherence</div>
+                <div class="value">${reportMedicationSummary.completedCount}/${reportMedicationSummary.dueCount || 0}</div>
+                <div class="muted">On time: ${reportMedicationSummary.onTimeCount}, late: ${reportMedicationSummary.lateCount}, missed: ${reportMedicationSummary.missedCount}</div>
+              </div>
+              <div class="card">
+                <div class="label">Fitbit steps</div>
+                <div class="value">${reportSnapshot.averageSteps.toLocaleString()}</div>
+                <div class="muted">Average daily steps in range</div>
+              </div>
+              <div class="card">
+                <div class="label">Sleep</div>
+                <div class="value">${reportSnapshot.averageSleepMinutes}</div>
+                <div class="muted">Average minutes per recorded day</div>
+              </div>
+            </div>
           </section>
-          <section><h2>Recent Blood Pressure</h2><ul>${bpList}</ul></section>
-          <section><h2>Recent Food Logs</h2><ul>${foodList}</ul></section>
-          <section><h2>Medication Logs</h2><ul>${medicationList}</ul></section>
+          <section><h2>Blood Pressure Readings</h2><ul>${bpList || '<li>No blood pressure readings in this range.</li>'}</ul></section>
+          <section><h2>Food and Sodium Logs</h2><ul>${foodList || '<li>No food logs in this range.</li>'}</ul></section>
+          <section><h2>Medication Logs</h2><ul>${medicationList || '<li>No medication logs in this range.</li>'}</ul></section>
+          <section><h2>Current Medicine Supply</h2><ul>${supplyList || '<li>No medicine supply tracker saved yet.</li>'}</ul></section>
+          <section><h2>Fitbit History</h2><ul>${fitbitList || '<li>No Fitbit history in this range.</li>'}</ul></section>
         </body>
       </html>
     `)
@@ -4005,14 +4295,14 @@ function App() {
               <p className="eyebrow">Medicine Alert</p>
               <h2>Low medicine supply</h2>
             </div>
-            <p className="panel-copy">These medicines are at or below your low-supply warning level.</p>
+            <p className="panel-copy">These medicines are at or below your low-supply warning level. Telegram can send one alert per medicine per day when a supply stays low.</p>
           </div>
           <ul className="activity-list">
             {lowMedicationSupplies.map((entry) => (
               <li key={entry.id}>
                 <strong>{entry.medicationName}</strong>
                 <small>
-                  {entry.tabletsRemaining} tablets left, warning set at {entry.lowThreshold}
+                  {entry.tabletsRemaining} tablets left, warning set at {entry.lowThreshold}, {buildMedicationSupplySummary(entry).message}
                 </small>
               </li>
             ))}
@@ -4126,6 +4416,14 @@ function App() {
           />
 
           <ExportPanel
+            reportRangePreset={reportRangePreset}
+            setReportRangePreset={setReportRangePreset}
+            reportStartDate={reportStartDate}
+            setReportStartDate={setReportStartDate}
+            reportEndDate={reportEndDate}
+            setReportEndDate={setReportEndDate}
+            reportRangeLabel={reportRange.label}
+            reportSnapshot={reportSnapshot}
             onPrintReport={handlePrintReport}
             onExportBloodPressureCsv={handleExportBloodPressureCsv}
             onExportMedicationCsv={handleExportMedicationCsv}

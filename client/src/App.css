@@ -939,6 +939,31 @@ textarea {
   gap: 12px;
 }
 
+.report-range-card {
+  margin-bottom: 16px;
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(22, 48, 47, 0.08);
+  display: grid;
+  gap: 16px;
+}
+
+.report-range-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.report-range-grid label {
+  display: grid;
+  gap: 8px;
+}
+
+.report-summary-grid {
+  margin-bottom: 0;
+}
+
 .export-upload {
   position: relative;
   display: inline-flex;
@@ -1314,7 +1339,8 @@ textarea {
   .summary-chip-grid,
   .summary-grid--badges,
   .camera-help__grid,
-  .export-grid {
+  .export-grid,
+  .report-range-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2179,6 +2205,7 @@ select:focus {
 [data-theme='light'] .food-check__card,
 [data-theme='light'] .fitbit-card,
 [data-theme='light'] .badge-card,
+[data-theme='light'] .report-range-card,
 [data-theme='light'] .summary-chip,
 [data-theme='light'] .checklist-card,
 [data-theme='light'] .daily-log-card,
@@ -2194,6 +2221,12 @@ select:focus {
     linear-gradient(180deg, rgba(255, 249, 236, 0.98), rgba(255, 245, 226, 0.92)),
     radial-gradient(circle at top right, rgba(255, 187, 67, 0.12), transparent 30%);
   border-color: rgba(255, 188, 86, 0.2);
+}
+
+[data-theme='light'] .report-range-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 249, 253, 0.9)),
+    radial-gradient(circle at top right, rgba(13, 217, 255, 0.07), transparent 34%);
 }
 
 [data-theme='light'] .supply-card--good {

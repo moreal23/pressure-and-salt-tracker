@@ -169,6 +169,36 @@ function buildTelegramReminderMessage(reminder, schedule) {
   return detailLines.join('\n')
 }
 
+function buildMedicationSupplyAlertDetails(entry) {
+  const tabletsRemaining = Number(entry.tabletsRemaining ?? 0)
+  const tabletsPerDose = Math.max(1, Number(entry.tabletsPerDose ?? 1))
+  const estimatedDaysLeft = Math.max(0, Math.floor(tabletsRemaining / tabletsPerDose))
+
+  return {
+    tabletsRemaining,
+    tabletsPerDose,
+    estimatedDaysLeft,
+  }
+}
+
+function buildTelegramLowSupplyMessage(entries, schedule) {
+  const lines = [
+    'PressureSalt low medicine supply alert',
+    `Date: ${schedule.dayKey} (${schedule.reminderTimezone})`,
+    '',
+  ]
+
+  for (const entry of entries) {
+    const details = buildMedicationSupplyAlertDetails(entry)
+    lines.push(
+      `${entry.medicationName}: ${details.tabletsRemaining} tablets left, about ${details.estimatedDaysLeft} day${details.estimatedDaysLeft === 1 ? '' : 's'} left. Low warning is set at ${entry.lowThreshold} tablets.`
+    )
+  }
+
+  lines.push('', 'Consider requesting a refill before you run out.')
+  return lines.join('\n')
+}
+
 async function sendTelegramMessage(telegramConfig, text) {
   const response = await fetch(`https://api.telegram.org/bot${telegramConfig.botToken}/sendMessage`, {
     method: 'POST',
@@ -228,6 +258,55 @@ async function sendDueReminderMessages(env) {
   }
 
   return { sentCount, reason: 'ok' }
+}
+
+async function sendLowSupplyAlerts(env) {
+  const store = new D1Store(env)
+  const telegramConfig = getTelegramConfig(env)
+
+  if (!isTelegramConfigured(telegramConfig)) {
+    return { sentCount: 0, reason: 'telegram-not-configured' }
+  }
+
+  const schedule = {
+    reminderTimezone: telegramConfig.reminderTimezone,
+    ...getReminderDateParts(telegramConfig.reminderTimezone),
+  }
+  const lowSupplies = (await store.getMedicationSupplies()).filter(
+    (entry) => Number(entry.tabletsRemaining ?? 0) <= Number(entry.lowThreshold ?? 0)
+  )
+
+  if (!lowSupplies.length) {
+    return { sentCount: 0, reason: 'no-low-supply' }
+  }
+
+  const unsentLowSupplies = []
+
+  for (const entry of lowSupplies) {
+    const alreadySent = await store.hasReminderDelivery(`medication-supply-low:${entry.id}`, schedule.dayKey, 'telegram-low-supply')
+
+    if (!alreadySent) {
+      unsentLowSupplies.push(entry)
+    }
+  }
+
+  if (!unsentLowSupplies.length) {
+    return { sentCount: 0, reason: 'already-sent-today' }
+  }
+
+  await sendTelegramMessage(telegramConfig, buildTelegramLowSupplyMessage(unsentLowSupplies, schedule))
+
+  for (const entry of unsentLowSupplies) {
+    await store.recordReminderDelivery({
+      id: crypto.randomUUID(),
+      reminderId: `medication-supply-low:${entry.id}`,
+      dayKey: schedule.dayKey,
+      channel: 'telegram-low-supply',
+      sentAt: new Date().toISOString(),
+    })
+  }
+
+  return { sentCount: unsentLowSupplies.length, reason: 'ok' }
 }
 
 async function syncScheduledFitbitData(env) {
@@ -889,6 +968,7 @@ export default {
   },
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(sendDueReminderMessages(env))
+    ctx.waitUntil(sendLowSupplyAlerts(env))
     ctx.waitUntil(syncScheduledFitbitData(env))
   },
 }
