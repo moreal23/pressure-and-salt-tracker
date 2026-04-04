@@ -3946,7 +3946,7 @@ function App() {
 
       <section className="hero">
         <div className="hero-copy">
-          <p className="eyebrow">Blood Pressure + Sodium Tracker</p>
+          <p className="eyebrow">Health Command Deck</p>
           <div className="hero-badges">
             <span>Blood pressure tracking</span>
             <span>Sodium goals</span>
