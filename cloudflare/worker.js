@@ -22,6 +22,7 @@ import {
   parseImportPayload,
   parseImportedBloodPressureText,
   parseMedicationPayload,
+  parseMedicationSupplyPayload,
   parseReminderPayload,
   parseSettingsPayload,
   readJson,
@@ -411,6 +412,12 @@ async function handleApiRequest(request, env) {
     })
   }
 
+  if (pathname === '/api/medication-supplies' && method === 'GET') {
+    return jsonResponse({
+      medicationSupplies: await store.getMedicationSupplies(),
+    })
+  }
+
   if (pathname === '/api/medications' && method === 'POST') {
     const body = await readJson(request)
     const entry = {
@@ -420,12 +427,32 @@ async function handleApiRequest(request, env) {
     return jsonResponse({ entry: await store.addMedicationLog(entry) }, 201)
   }
 
+  if (pathname === '/api/medication-supplies' && method === 'POST') {
+    const body = await readJson(request)
+    const entry = {
+      id: body?.id || crypto.randomUUID(),
+      ...parseMedicationSupplyPayload(body),
+    }
+    return jsonResponse({ entry: await store.saveMedicationSupply(entry) }, 201)
+  }
+
   if (pathname.startsWith('/api/medications/') && method === 'DELETE') {
     const id = pathname.split('/').pop()
     const deleted = await store.deleteMedicationLog(id)
 
     if (!deleted) {
       return errorResponse('Medication log not found.', 404)
+    }
+
+    return jsonResponse({ ok: true })
+  }
+
+  if (pathname.startsWith('/api/medication-supplies/') && method === 'DELETE') {
+    const id = pathname.split('/').pop()
+    const deleted = await store.deleteMedicationSupply(id)
+
+    if (!deleted) {
+      return errorResponse('Medication supply entry not found.', 404)
     }
 
     return jsonResponse({ ok: true })

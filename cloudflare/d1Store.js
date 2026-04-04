@@ -166,6 +166,19 @@ export class D1Store {
 
     await this.db.prepare(
       `
+        CREATE TABLE IF NOT EXISTS medication_supplies (
+          id TEXT PRIMARY KEY,
+          medication_name TEXT NOT NULL,
+          tablets_remaining INTEGER NOT NULL,
+          tablets_per_dose INTEGER NOT NULL DEFAULT 1,
+          low_threshold INTEGER NOT NULL DEFAULT 14,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `
+    ).run()
+
+    await this.db.prepare(
+      `
         CREATE TABLE IF NOT EXISTS reminders (
           id TEXT PRIMARY KEY,
           title TEXT NOT NULL,
@@ -713,13 +726,149 @@ export class D1Store {
       .bind(entry.id, entry.medicationName, entry.dosage, entry.takenAt, entry.notes)
       .run()
 
+    await this.adjustMedicationSupply(entry.medicationName, -1)
+
     return entry
   }
 
   async deleteMedicationLog(id) {
     await this.ensureSetup()
+    const existing = await this.db
+      .prepare('SELECT medication_name AS medicationName FROM medication_logs WHERE id = ?')
+      .bind(id)
+      .first()
     const result = await this.db.prepare('DELETE FROM medication_logs WHERE id = ?').bind(id).run()
+
+    if (Number(result.meta?.changes ?? 0) > 0 && existing?.medicationName) {
+      await this.adjustMedicationSupply(existing.medicationName, 1)
+    }
+
     return Number(result.meta?.changes ?? 0) > 0
+  }
+
+  async getMedicationSupplies() {
+    await this.ensureSetup()
+    const result = await this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            medication_name AS medicationName,
+            tablets_remaining AS tabletsRemaining,
+            tablets_per_dose AS tabletsPerDose,
+            low_threshold AS lowThreshold,
+            updated_at AS updatedAt
+          FROM medication_supplies
+          ORDER BY medication_name COLLATE NOCASE ASC
+        `
+      )
+      .all()
+
+    return (result.results ?? []).map((row) => ({
+      ...row,
+      tabletsRemaining: Number(row.tabletsRemaining),
+      tabletsPerDose: Number(row.tabletsPerDose),
+      lowThreshold: Number(row.lowThreshold),
+    }))
+  }
+
+  async saveMedicationSupply(entry) {
+    await this.ensureSetup()
+    const id = entry.id ?? crypto.randomUUID()
+
+    await this.db
+      .prepare(
+        `
+          INSERT INTO medication_supplies (
+            id,
+            medication_name,
+            tablets_remaining,
+            tablets_per_dose,
+            low_threshold,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(id)
+          DO UPDATE SET
+            medication_name = excluded.medication_name,
+            tablets_remaining = excluded.tablets_remaining,
+            tablets_per_dose = excluded.tablets_per_dose,
+            low_threshold = excluded.low_threshold,
+            updated_at = CURRENT_TIMESTAMP
+        `
+      )
+      .bind(id, entry.medicationName, entry.tabletsRemaining, entry.tabletsPerDose, entry.lowThreshold)
+      .run()
+
+    return {
+      id,
+      medicationName: entry.medicationName,
+      tabletsRemaining: entry.tabletsRemaining,
+      tabletsPerDose: entry.tabletsPerDose,
+      lowThreshold: entry.lowThreshold,
+      updatedAt: new Date().toISOString(),
+    }
+  }
+
+  async deleteMedicationSupply(id) {
+    await this.ensureSetup()
+    const result = await this.db.prepare('DELETE FROM medication_supplies WHERE id = ?').bind(id).run()
+    return Number(result.meta?.changes ?? 0) > 0
+  }
+
+  async adjustMedicationSupply(medicationName, doseCountDelta) {
+    await this.ensureSetup()
+    const normalizedMedication = String(medicationName ?? '').trim().toLowerCase()
+
+    if (!normalizedMedication || !doseCountDelta) {
+      return null
+    }
+
+    const existing = await this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            medication_name AS medicationName,
+            tablets_remaining AS tabletsRemaining,
+            tablets_per_dose AS tabletsPerDose,
+            low_threshold AS lowThreshold
+          FROM medication_supplies
+        `
+      )
+      .all()
+
+    const match = (existing.results ?? []).find(
+      (entry) => String(entry.medicationName ?? '').trim().toLowerCase() === normalizedMedication
+    )
+
+    if (!match) {
+      return null
+    }
+
+    const nextRemaining = Math.max(
+      0,
+      Number(match.tabletsRemaining) + doseCountDelta * Number(match.tabletsPerDose)
+    )
+
+    await this.db
+      .prepare(
+        `
+          UPDATE medication_supplies
+          SET tablets_remaining = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `
+      )
+      .bind(nextRemaining, match.id)
+      .run()
+
+    return {
+      id: match.id,
+      medicationName: match.medicationName,
+      tabletsRemaining: nextRemaining,
+      tabletsPerDose: Number(match.tabletsPerDose),
+      lowThreshold: Number(match.lowThreshold),
+    }
   }
 
   async getReminders() {
@@ -811,7 +960,7 @@ export class D1Store {
   }
 
   async getBackupData() {
-    const [settings, privacyPinHash, bloodPressureLogs, foodLogs, favoriteFoods, medicationLogs, reminders, fitbit, goalBadges] =
+    const [settings, privacyPinHash, bloodPressureLogs, foodLogs, favoriteFoods, medicationLogs, medicationSupplies, reminders, fitbit, goalBadges] =
       await Promise.all([
         this.getSettings(),
         this.getPrivacyPinHash(),
@@ -819,6 +968,7 @@ export class D1Store {
         this.getFoodLogs(),
         this.getFavoriteFoods(),
         this.getMedicationLogs(),
+        this.getMedicationSupplies(),
         this.getReminders(),
         this.getFitbitState(),
         this.getGoalBadges(),
@@ -836,6 +986,7 @@ export class D1Store {
         foodLogs,
         favoriteFoods,
         medicationLogs,
+        medicationSupplies,
         reminders,
         fitbit: createBackupSafeFitbitState(fitbit),
         goalBadges,
@@ -850,6 +1001,7 @@ export class D1Store {
       this.db.prepare('DELETE FROM food_logs'),
       this.db.prepare('DELETE FROM favorite_foods'),
       this.db.prepare('DELETE FROM medication_logs'),
+      this.db.prepare('DELETE FROM medication_supplies'),
       this.db.prepare('DELETE FROM reminders'),
       this.db.prepare('DELETE FROM goal_badges'),
       this.db.prepare('DELETE FROM fitbit_connection'),
@@ -900,6 +1052,16 @@ export class D1Store {
         dosage: entry.dosage,
         takenAt: entry.takenAt,
         notes: entry.notes ?? '',
+      })
+    }
+
+    for (const entry of backup.medicationSupplies ?? []) {
+      await this.saveMedicationSupply({
+        id: entry.id,
+        medicationName: entry.medicationName,
+        tabletsRemaining: Number(entry.tabletsRemaining),
+        tabletsPerDose: Number(entry.tabletsPerDose ?? 1),
+        lowThreshold: Number(entry.lowThreshold ?? 14),
       })
     }
 

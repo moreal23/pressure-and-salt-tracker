@@ -167,6 +167,16 @@ function createSeedData() {
         notes: 'Morning dose',
       },
     ],
+    medicationSupplies: [
+      {
+        id: 'supply-1',
+        medicationName: 'Lisinopril',
+        tabletsRemaining: 90,
+        tabletsPerDose: 1,
+        lowThreshold: 14,
+        updatedAt: withTime(daysAgo(0), 8, 1),
+      },
+    ],
     reminders: [
       {
         id: 'reminder-1',

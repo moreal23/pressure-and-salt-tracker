@@ -151,6 +151,15 @@ class PostgresStore {
         notes TEXT NOT NULL DEFAULT ''
       );
 
+      CREATE TABLE IF NOT EXISTS medication_supplies (
+        id UUID PRIMARY KEY,
+        medication_name TEXT NOT NULL,
+        tablets_remaining INTEGER NOT NULL,
+        tablets_per_dose INTEGER NOT NULL DEFAULT 1,
+        low_threshold INTEGER NOT NULL DEFAULT 14,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS reminders (
         id UUID PRIMARY KEY,
         title TEXT NOT NULL,
@@ -599,12 +608,108 @@ class PostgresStore {
       [entry.id, entry.medicationName, entry.dosage, entry.takenAt, entry.notes]
     )
 
+    await this.adjustMedicationSupply(entry.medicationName, -1)
+
     return entry
   }
 
   async deleteMedicationLog(id) {
+    const existing = await this.pool.query(
+      'SELECT medication_name AS "medicationName" FROM medication_logs WHERE id = $1',
+      [id]
+    )
     const result = await this.pool.query('DELETE FROM medication_logs WHERE id = $1', [id])
+
+    if (result.rowCount > 0 && existing.rows[0]?.medicationName) {
+      await this.adjustMedicationSupply(existing.rows[0].medicationName, 1)
+    }
+
     return result.rowCount > 0
+  }
+
+  async getMedicationSupplies() {
+    const result = await this.pool.query(
+      `
+        SELECT
+          id,
+          medication_name AS "medicationName",
+          tablets_remaining AS "tabletsRemaining",
+          tablets_per_dose AS "tabletsPerDose",
+          low_threshold AS "lowThreshold",
+          updated_at AS "updatedAt"
+        FROM medication_supplies
+        ORDER BY medication_name ASC
+      `
+    )
+
+    return result.rows
+  }
+
+  async saveMedicationSupply(entry) {
+    const result = await this.pool.query(
+      `
+        INSERT INTO medication_supplies (
+          id, medication_name, tablets_remaining, tablets_per_dose, low_threshold, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (id)
+        DO UPDATE SET
+          medication_name = EXCLUDED.medication_name,
+          tablets_remaining = EXCLUDED.tablets_remaining,
+          tablets_per_dose = EXCLUDED.tablets_per_dose,
+          low_threshold = EXCLUDED.low_threshold,
+          updated_at = NOW()
+        RETURNING
+          id,
+          medication_name AS "medicationName",
+          tablets_remaining AS "tabletsRemaining",
+          tablets_per_dose AS "tabletsPerDose",
+          low_threshold AS "lowThreshold",
+          updated_at AS "updatedAt"
+      `,
+      [
+        entry.id,
+        entry.medicationName,
+        entry.tabletsRemaining,
+        entry.tabletsPerDose,
+        entry.lowThreshold,
+      ]
+    )
+
+    return result.rows[0]
+  }
+
+  async deleteMedicationSupply(id) {
+    const result = await this.pool.query('DELETE FROM medication_supplies WHERE id = $1', [id])
+    return result.rowCount > 0
+  }
+
+  async adjustMedicationSupply(medicationName, doseCountDelta) {
+    const normalizedMedication = String(medicationName ?? '').trim().toLowerCase()
+
+    if (!normalizedMedication || !doseCountDelta) {
+      return null
+    }
+
+    const result = await this.pool.query(
+      `
+        UPDATE medication_supplies
+        SET
+          tablets_remaining = GREATEST(0, tablets_remaining + ($1 * tablets_per_dose)),
+          updated_at = NOW()
+        WHERE LOWER(TRIM(medication_name)) = $2
+        RETURNING
+          id,
+          medication_name AS "medicationName",
+          tablets_remaining AS "tabletsRemaining",
+          tablets_per_dose AS "tabletsPerDose",
+          low_threshold AS "lowThreshold",
+          updated_at AS "updatedAt"
+      `,
+      [doseCountDelta, normalizedMedication]
+    )
+
+    return result.rows[0] ?? null
   }
 
   async getReminders() {
@@ -681,7 +786,7 @@ class PostgresStore {
   }
 
   async getBackupData() {
-    const [settings, privacyPinHash, bloodPressureLogs, foodLogs, favoriteFoods, medicationLogs, reminders, fitbitState, goalBadges] =
+    const [settings, privacyPinHash, bloodPressureLogs, foodLogs, favoriteFoods, medicationLogs, medicationSupplies, reminders, fitbitState, goalBadges] =
       await Promise.all([
         this.getSettings(),
         this.getPrivacyPinHash(),
@@ -689,6 +794,7 @@ class PostgresStore {
         this.getFoodLogs(),
         this.getFavoriteFoods(),
         this.getMedicationLogs(),
+        this.getMedicationSupplies(),
         this.getReminders(),
         this.getFitbitState(),
         this.getGoalBadges(),
@@ -706,6 +812,7 @@ class PostgresStore {
         foodLogs,
         favoriteFoods,
         medicationLogs,
+        medicationSupplies,
         reminders,
         fitbit: createBackupSafeFitbitState(fitbitState),
         goalBadges,
@@ -722,6 +829,7 @@ class PostgresStore {
       await client.query('DELETE FROM food_logs')
       await client.query('DELETE FROM favorite_foods')
       await client.query('DELETE FROM medication_logs')
+      await client.query('DELETE FROM medication_supplies')
       await client.query('DELETE FROM reminders')
       await client.query('DELETE FROM goal_badges')
       await client.query('DELETE FROM fitbit_connection')
@@ -784,6 +892,22 @@ class PostgresStore {
             VALUES ($1, $2, $3, $4, $5)
           `,
           [entry.id, entry.medicationName, entry.dosage, entry.takenAt, entry.notes ?? '']
+        )
+      }
+
+      for (const entry of backup.medicationSupplies ?? []) {
+        await client.query(
+          `
+            INSERT INTO medication_supplies (id, medication_name, tablets_remaining, tablets_per_dose, low_threshold, updated_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+          `,
+          [
+            entry.id,
+            entry.medicationName,
+            entry.tabletsRemaining,
+            entry.tabletsPerDose ?? 1,
+            entry.lowThreshold ?? 14,
+          ]
         )
       }
 

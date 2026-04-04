@@ -79,6 +79,14 @@ const medicationSchema = z.object({
   notes: z.string().max(300).default(''),
 })
 
+const medicationSupplySchema = z.object({
+  id: z.string().optional(),
+  medicationName: z.string().min(2).max(120),
+  tabletsRemaining: z.number().int().min(0).max(10000),
+  tabletsPerDose: z.number().int().min(1).max(50),
+  lowThreshold: z.number().int().min(1).max(1000),
+})
+
 const reminderSchema = z.object({
   title: z.string().min(2).max(120),
   reminderType: z.string().min(2).max(40),
@@ -115,6 +123,7 @@ const backupRestoreSchema = z.object({
     foodLogs: z.array(z.any()).optional(),
     favoriteFoods: z.array(z.any()).optional(),
     medicationLogs: z.array(z.any()).optional(),
+    medicationSupplies: z.array(z.any()).optional(),
     reminders: z.array(z.any()).optional(),
     fitbit: z.any().optional(),
     goalBadges: z.array(z.any()).optional(),
@@ -994,6 +1003,17 @@ app.get('/api/medications', async (request, response, next) => {
   }
 })
 
+app.get('/api/medication-supplies', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    response.json({
+      medicationSupplies: await store.getMedicationSupplies(),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.post('/api/medications', async (request, response, next) => {
   try {
     const parsed = medicationSchema.parse(request.body)
@@ -1008,6 +1028,23 @@ app.post('/api/medications', async (request, response, next) => {
   }
 })
 
+app.post('/api/medication-supplies', async (request, response, next) => {
+  try {
+    const parsed = medicationSupplySchema.parse(request.body)
+    const store = await storePromise
+    const entry = await store.saveMedicationSupply({
+      id: parsed.id || randomUUID(),
+      medicationName: parsed.medicationName,
+      tabletsRemaining: parsed.tabletsRemaining,
+      tabletsPerDose: parsed.tabletsPerDose,
+      lowThreshold: parsed.lowThreshold,
+    })
+    response.status(201).json({ entry })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.delete('/api/medications/:id', async (request, response, next) => {
   try {
     const store = await storePromise
@@ -1015,6 +1052,22 @@ app.delete('/api/medications/:id', async (request, response, next) => {
 
     if (!deleted) {
       response.status(404).json({ error: 'Medication log not found.' })
+      return
+    }
+
+    response.json({ ok: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/medication-supplies/:id', async (request, response, next) => {
+  try {
+    const store = await storePromise
+    const deleted = await store.deleteMedicationSupply(request.params.id)
+
+    if (!deleted) {
+      response.status(404).json({ error: 'Medication supply entry not found.' })
       return
     }
 

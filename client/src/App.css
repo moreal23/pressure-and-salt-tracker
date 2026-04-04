@@ -441,6 +441,10 @@ body {
   padding: 24px;
 }
 
+.panel--warning {
+  background: rgba(255, 246, 229, 0.88);
+}
+
 .panel-heading {
   display: flex;
   justify-content: space-between;
@@ -850,6 +854,26 @@ textarea {
 
 .fitbit-card small {
   color: #435856;
+}
+
+.supply-card {
+  border: 1px solid rgba(22, 48, 47, 0.08);
+}
+
+.supply-card p {
+  margin: 10px 0 6px;
+}
+
+.supply-card--good {
+  background: rgba(18, 120, 81, 0.08);
+}
+
+.supply-card--warning {
+  background: rgba(199, 139, 43, 0.12);
+}
+
+.supply-card--danger {
+  background: rgba(191, 47, 47, 0.12);
 }
 
 .badge-summary {

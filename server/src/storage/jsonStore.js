@@ -104,6 +104,9 @@ class JsonStore {
     if (!parsed.reminderDeliveries) {
       parsed.reminderDeliveries = []
     }
+    if (!parsed.medicationSupplies) {
+      parsed.medicationSupplies = []
+    }
     if (!parsed.favoriteFoods) {
       parsed.favoriteFoods = []
     }
@@ -404,12 +407,14 @@ class JsonStore {
       ...entry,
     }
     data.medicationLogs.push(nextEntry)
+    this.adjustMedicationSupplyInMemory(data, nextEntry.medicationName, -1)
     await this.writeData(data)
     return nextEntry
   }
 
   async deleteMedicationLog(id) {
     const data = await this.readData()
+    const existing = data.medicationLogs.find((entry) => entry.id === id)
     const nextLogs = data.medicationLogs.filter((entry) => entry.id !== id)
 
     if (nextLogs.length === data.medicationLogs.length) {
@@ -417,6 +422,74 @@ class JsonStore {
     }
 
     data.medicationLogs = nextLogs
+    if (existing?.medicationName) {
+      this.adjustMedicationSupplyInMemory(data, existing.medicationName, 1)
+    }
+    await this.writeData(data)
+    return true
+  }
+
+  adjustMedicationSupplyInMemory(data, medicationName, doseCountDelta) {
+    const normalizedMedication = String(medicationName ?? '').trim().toLowerCase()
+
+    if (!normalizedMedication || !doseCountDelta) {
+      return null
+    }
+
+    const match = data.medicationSupplies.find(
+      (entry) => String(entry.medicationName ?? '').trim().toLowerCase() === normalizedMedication
+    )
+
+    if (!match) {
+      return null
+    }
+
+    match.tabletsRemaining = Math.max(
+      0,
+      Number(match.tabletsRemaining) + doseCountDelta * Number(match.tabletsPerDose ?? 1)
+    )
+    match.updatedAt = new Date().toISOString()
+    return match
+  }
+
+  async getMedicationSupplies() {
+    const data = await this.readData()
+    return [...data.medicationSupplies].sort((left, right) =>
+      left.medicationName.localeCompare(right.medicationName)
+    )
+  }
+
+  async saveMedicationSupply(entry) {
+    const data = await this.readData()
+    const nextEntry = {
+      id: entry.id ?? randomUUID(),
+      medicationName: entry.medicationName,
+      tabletsRemaining: Number(entry.tabletsRemaining),
+      tabletsPerDose: Number(entry.tabletsPerDose),
+      lowThreshold: Number(entry.lowThreshold),
+      updatedAt: new Date().toISOString(),
+    }
+    const index = data.medicationSupplies.findIndex((item) => item.id === nextEntry.id)
+
+    if (index >= 0) {
+      data.medicationSupplies[index] = nextEntry
+    } else {
+      data.medicationSupplies.push(nextEntry)
+    }
+
+    await this.writeData(data)
+    return nextEntry
+  }
+
+  async deleteMedicationSupply(id) {
+    const data = await this.readData()
+    const nextSupplies = data.medicationSupplies.filter((entry) => entry.id !== id)
+
+    if (nextSupplies.length === data.medicationSupplies.length) {
+      return false
+    }
+
+    data.medicationSupplies = nextSupplies
     await this.writeData(data)
     return true
   }
@@ -493,6 +566,7 @@ class JsonStore {
       bloodPressureLogs: backup.bloodPressureLogs ?? [],
       foodLogs: backup.foodLogs ?? [],
       medicationLogs: backup.medicationLogs ?? [],
+      medicationSupplies: backup.medicationSupplies ?? [],
       reminders: backup.reminders ?? [],
       favoriteFoods: backup.favoriteFoods ?? [],
       fitbit: createBackupSafeFitbitState(backup.fitbit),

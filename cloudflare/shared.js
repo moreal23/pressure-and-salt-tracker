@@ -166,6 +166,15 @@ export function parseMedicationPayload(body) {
   }
 }
 
+export function parseMedicationSupplyPayload(body) {
+  return {
+    medicationName: ensureString(body?.medicationName, 'Medication name', 2, 120),
+    tabletsRemaining: ensureNumber(body?.tabletsRemaining, 'Tablets remaining', 0, 10000),
+    tabletsPerDose: ensureNumber(body?.tabletsPerDose, 'Tablets per dose', 1, 50),
+    lowThreshold: ensureNumber(body?.lowThreshold, 'Low supply threshold', 1, 1000),
+  }
+}
+
 export function parseReminderPayload(body) {
   const timeOfDay = ensureString(body?.timeOfDay, 'Reminder time', 5, 5)
 

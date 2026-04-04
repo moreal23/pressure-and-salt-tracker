@@ -39,6 +39,14 @@ const emptyMedicationForm = {
   notes: '',
 }
 
+const emptyMedicationSupplyForm = {
+  id: '',
+  medicationName: '',
+  tabletsRemaining: '90',
+  tabletsPerDose: '1',
+  lowThreshold: '14',
+}
+
 const emptyReminderForm = {
   title: '',
   reminderType: 'medication',
@@ -435,6 +443,30 @@ function buildWeeklyMedicationSummary(reminders, medicationLogs, now = new Date(
     missedCount,
     completedCount: onTimeCount + lateCount,
     dueCount,
+  }
+}
+
+function buildMedicationSupplySummary(entry) {
+  const tabletsRemaining = Number(entry.tabletsRemaining ?? 0)
+  const tabletsPerDose = Math.max(1, Number(entry.tabletsPerDose ?? 1))
+  const lowThreshold = Number(entry.lowThreshold ?? 14)
+  const estimatedDaysLeft = Math.floor(tabletsRemaining / tabletsPerDose)
+
+  let tone = 'good'
+  let message = `About ${estimatedDaysLeft} day${estimatedDaysLeft === 1 ? '' : 's'} left at ${tabletsPerDose} tablet${tabletsPerDose === 1 ? '' : 's'} per dose.`
+
+  if (tabletsRemaining <= 0) {
+    tone = 'danger'
+    message = 'You are out of this medicine and may need a refill right away.'
+  } else if (tabletsRemaining <= lowThreshold) {
+    tone = 'warning'
+    message = `Low supply: only ${tabletsRemaining} tablet${tabletsRemaining === 1 ? '' : 's'} left.`
+  }
+
+  return {
+    estimatedDaysLeft,
+    tone,
+    message,
   }
 }
 
@@ -1217,9 +1249,15 @@ function PrivacyLockScreen({ unlockPin, setUnlockPin, onUnlock, busy, error }) {
 
 function MedicationPanel({
   medicationLogs,
+  medicationSupplies,
   medicationForm,
+  medicationSupplyForm,
   setMedicationForm,
+  setMedicationSupplyForm,
   onSubmit,
+  onSupplySubmit,
+  onEditSupply,
+  onDeleteSupply,
   onDelete,
   deletingId,
 }) {
@@ -1283,6 +1321,105 @@ function MedicationPanel({
           Save medication log
         </button>
       </form>
+
+      <div className="panel-subsection">
+        <h3>Medicine supply</h3>
+        <p className="panel-copy">Track how many tablets are left so the app can warn you before you run low.</p>
+      </div>
+
+      <form className="form-grid" onSubmit={onSupplySubmit}>
+        <label>
+          <span>Medication name</span>
+          <input
+            type="text"
+            value={medicationSupplyForm.medicationName}
+            onChange={(event) =>
+              setMedicationSupplyForm((current) => ({ ...current, medicationName: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <label>
+          <span>Tablets left now</span>
+          <input
+            type="number"
+            min="0"
+            value={medicationSupplyForm.tabletsRemaining}
+            onChange={(event) =>
+              setMedicationSupplyForm((current) => ({ ...current, tabletsRemaining: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <label>
+          <span>Tablets per dose</span>
+          <input
+            type="number"
+            min="1"
+            value={medicationSupplyForm.tabletsPerDose}
+            onChange={(event) =>
+              setMedicationSupplyForm((current) => ({ ...current, tabletsPerDose: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <label>
+          <span>Low warning at</span>
+          <input
+            type="number"
+            min="1"
+            value={medicationSupplyForm.lowThreshold}
+            onChange={(event) =>
+              setMedicationSupplyForm((current) => ({ ...current, lowThreshold: event.target.value }))
+            }
+            required
+          />
+        </label>
+        <button className="button button--solid" type="submit">
+          {medicationSupplyForm.id ? 'Update supply' : 'Save supply'}
+        </button>
+      </form>
+
+      {medicationSupplies.length ? (
+        <div className="daily-log-list">
+          {medicationSupplies.map((entry) => {
+            const summary = buildMedicationSupplySummary(entry)
+
+            return (
+              <section key={entry.id} className={`daily-log-card supply-card supply-card--${summary.tone}`}>
+                <div className="history-main">
+                  <div>
+                    <strong>{entry.medicationName}</strong>
+                    <span>
+                      {entry.tabletsRemaining} tablets left • {summary.estimatedDaysLeft} day
+                      {summary.estimatedDaysLeft === 1 ? '' : 's'} left
+                    </span>
+                  </div>
+                  <div className="history-actions">
+                    <button className="button button--ghost" type="button" onClick={() => onEditSupply(entry)}>
+                      Edit
+                    </button>
+                    <button
+                      className="button button--danger"
+                      type="button"
+                      onClick={() => onDeleteSupply(entry)}
+                      disabled={deletingId === entry.id}
+                    >
+                      {deletingId === entry.id ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </div>
+                </div>
+                <p>{summary.message}</p>
+                <small>
+                  Each saved dose subtracts {entry.tabletsPerDose} tablet{entry.tabletsPerDose === 1 ? '' : 's'} automatically.
+                </small>
+              </section>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="import-hint">Add your medicine supply here, like 90 tablets with 1 tablet per day.</div>
+      )}
 
       <div className="panel-subsection">
         <h3>Daily medication history</h3>
@@ -2289,11 +2426,13 @@ function App() {
   const [goalValue, setGoalValue] = useState('2300')
   const [savingState, setSavingState] = useState('')
   const [medicationLogs, setMedicationLogs] = useState([])
+  const [medicationSupplies, setMedicationSupplies] = useState([])
   const [reminders, setReminders] = useState([])
   const [medicationForm, setMedicationForm] = useState({
     ...emptyMedicationForm,
     takenAt: getLocalDateTimeValue(),
   })
+  const [medicationSupplyForm, setMedicationSupplyForm] = useState(emptyMedicationSupplyForm)
   const [reminderForm, setReminderForm] = useState(emptyReminderForm)
   const [notificationPermission, setNotificationPermission] = useState(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
@@ -2357,12 +2496,13 @@ function App() {
     }
 
     try {
-      const [dashboardData, historyData, fitbitData, celebrationsData, medicationData, reminderData, favoriteFoodData] = await Promise.all([
+      const [dashboardData, historyData, fitbitData, celebrationsData, medicationData, medicationSupplyData, reminderData, favoriteFoodData] = await Promise.all([
         fetchJson('/api/dashboard'),
         fetchJson('/api/history'),
         fetchJson('/api/fitbit/status'),
         fetchJson('/api/celebrations'),
         fetchJson('/api/medications'),
+        fetchJson('/api/medication-supplies'),
         fetchJson('/api/reminders'),
         fetchJson('/api/favorite-foods'),
       ])
@@ -2371,6 +2511,7 @@ function App() {
       setFitbit(fitbitData)
       setGoalBadges(celebrationsData.goalBadges ?? [])
       setMedicationLogs(medicationData.medicationLogs ?? [])
+      setMedicationSupplies(medicationSupplyData.medicationSupplies ?? [])
       setReminders(reminderData.reminders ?? [])
       setFavoriteFoods(favoriteFoodData.favoriteFoods ?? [])
       setGoalValue(String(dashboardData.settings.sodiumGoalMg))
@@ -2547,6 +2688,11 @@ function App() {
   const weeklyMedicationSummary = useMemo(
     () => buildWeeklyMedicationSummary(reminders, medicationLogs),
     [reminders, medicationLogs]
+  )
+  const lowMedicationSupplies = useMemo(
+    () =>
+      medicationSupplies.filter((entry) => Number(entry.tabletsRemaining ?? 0) <= Number(entry.lowThreshold ?? 0)),
+    [medicationSupplies]
   )
   const recentFoods = useMemo(() => buildRecentFoodChoices(history.foodLogs), [history.foodLogs])
   const fitbitChartData = useMemo(
@@ -3062,6 +3208,60 @@ function App() {
       setSavingState('Medication log saved.')
     } catch (error) {
       setSavingState(error.message)
+    }
+  }
+
+  async function handleMedicationSupplySubmit(event) {
+    event.preventDefault()
+    setSavingState('Saving medicine supply...')
+
+    try {
+      await fetchJson('/api/medication-supplies', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: medicationSupplyForm.id || undefined,
+          medicationName: medicationSupplyForm.medicationName,
+          tabletsRemaining: Number(medicationSupplyForm.tabletsRemaining),
+          tabletsPerDose: Number(medicationSupplyForm.tabletsPerDose),
+          lowThreshold: Number(medicationSupplyForm.lowThreshold),
+        }),
+      })
+      setMedicationSupplyForm(emptyMedicationSupplyForm)
+      await loadDashboard({ silent: true })
+      setSavingState('Medicine supply saved.')
+    } catch (error) {
+      setSavingState(error.message)
+    }
+  }
+
+  function handleEditMedicationSupply(entry) {
+    setMedicationSupplyForm({
+      id: entry.id,
+      medicationName: entry.medicationName,
+      tabletsRemaining: String(entry.tabletsRemaining),
+      tabletsPerDose: String(entry.tabletsPerDose),
+      lowThreshold: String(entry.lowThreshold),
+    })
+    setSavingState(`Editing supply for ${entry.medicationName}.`)
+  }
+
+  async function handleDeleteMedicationSupply(entry) {
+    if (!window.confirm(`Delete medicine supply tracker for ${entry.medicationName}?`)) {
+      return
+    }
+
+    setDeletingId(entry.id)
+    setSavingState('Deleting medicine supply...')
+
+    try {
+      await fetchJson(`/api/medication-supplies/${entry.id}`, { method: 'DELETE' })
+      setMedicationSupplyForm((current) => (current.id === entry.id ? emptyMedicationSupplyForm : current))
+      await loadDashboard({ silent: true })
+      setSavingState('Medicine supply deleted.')
+    } catch (error) {
+      setSavingState(error.message)
+    } finally {
+      setDeletingId('')
     }
   }
 
@@ -3736,6 +3936,28 @@ function App() {
 
       <SyncStatusBar items={syncStatusItems} />
 
+      {lowMedicationSupplies.length ? (
+        <section className="panel panel--warning">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Medicine Alert</p>
+              <h2>Low medicine supply</h2>
+            </div>
+            <p className="panel-copy">These medicines are at or below your low-supply warning level.</p>
+          </div>
+          <ul className="activity-list">
+            {lowMedicationSupplies.map((entry) => (
+              <li key={entry.id}>
+                <strong>{entry.medicationName}</strong>
+                <small>
+                  {entry.tabletsRemaining} tablets left, warning set at {entry.lowThreshold}
+                </small>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="summary-grid">
         <SummaryCard
           title="Latest BP"
@@ -3913,9 +4135,15 @@ function App() {
 
           <MedicationPanel
             medicationLogs={medicationLogs}
+            medicationSupplies={medicationSupplies}
             medicationForm={medicationForm}
+            medicationSupplyForm={medicationSupplyForm}
             setMedicationForm={setMedicationForm}
+            setMedicationSupplyForm={setMedicationSupplyForm}
             onSubmit={handleMedicationSubmit}
+            onSupplySubmit={handleMedicationSupplySubmit}
+            onEditSupply={handleEditMedicationSupply}
+            onDeleteSupply={handleDeleteMedicationSupply}
             onDelete={handleDeleteMedication}
             deletingId={deletingId}
           />

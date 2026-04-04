@@ -77,6 +77,15 @@ CREATE TABLE IF NOT EXISTS medication_logs (
   notes TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS medication_supplies (
+  id UUID PRIMARY KEY,
+  medication_name TEXT NOT NULL,
+  tablets_remaining INTEGER NOT NULL,
+  tablets_per_dose INTEGER NOT NULL DEFAULT 1,
+  low_threshold INTEGER NOT NULL DEFAULT 14,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS reminders (
   id UUID PRIMARY KEY,
   title TEXT NOT NULL,
