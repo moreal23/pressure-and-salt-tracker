@@ -929,8 +929,118 @@ textarea {
   border-radius: 50%;
   background: linear-gradient(180deg, #ffd76a, #d7a516);
   color: #fff7d6;
-  font-size: 1.4rem;
+  font-size: 0;
   box-shadow: 0 10px 20px rgba(176, 131, 19, 0.2);
+}
+
+.badge-medal::before {
+  content: "*";
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.badge-tree-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(240px, 0.8fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.badge-growth-card,
+.badge-moment-card {
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(157, 191, 215, 0.16);
+  background:
+    radial-gradient(circle at top left, rgba(255, 215, 116, 0.18), transparent 28%),
+    linear-gradient(180deg, rgba(12, 24, 34, 0.9), rgba(8, 18, 28, 0.94));
+  display: grid;
+  gap: 14px;
+}
+
+.badge-growth-card h3 {
+  margin: 0;
+  font-size: 1.6rem;
+  color: #f7f2d4;
+}
+
+.badge-growth-track {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.badge-growth-node {
+  padding: 14px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(97, 129, 150, 0.18);
+  background: rgba(9, 20, 31, 0.68);
+  display: grid;
+  gap: 6px;
+  opacity: 0.55;
+  transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease;
+}
+
+.badge-growth-node--earned {
+  opacity: 1;
+  border-color: rgba(255, 209, 96, 0.32);
+  background:
+    radial-gradient(circle at top left, rgba(255, 209, 96, 0.14), transparent 30%),
+    rgba(14, 25, 36, 0.92);
+}
+
+.badge-growth-node--current {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
+}
+
+.badge-growth-node__marker {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255, 223, 128, 0.92), rgba(213, 154, 20, 0.88));
+  color: #3b2800;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.badge-growth-node strong,
+.badge-moment-card strong {
+  color: #f4f8fb;
+}
+
+.badge-growth-node small,
+.badge-moment-card small,
+.badge-growth-meta span,
+.badge-moment-card span {
+  color: #8ea6b5;
+}
+
+.badge-growth-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.badge-moment-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.badge-moment-card span {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.74rem;
+}
+
+.badge-grid--tree {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.badge-card--tree {
+  min-height: 156px;
 }
 
 .export-grid {
@@ -1336,6 +1446,8 @@ textarea {
   .food-check,
   .fitbit-summary,
   .badge-grid,
+  .badge-tree-overview,
+  .badge-growth-track,
   .summary-chip-grid,
   .summary-grid--badges,
   .camera-help__grid,
@@ -1993,6 +2105,41 @@ select:focus {
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 249, 253, 0.88)),
     linear-gradient(90deg, rgba(9, 190, 255, 0.05), rgba(255, 255, 255, 0));
   backdrop-filter: blur(18px);
+}
+
+[data-theme='light'] .badge-growth-card,
+[data-theme='light'] .badge-moment-card {
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 102, 0.2), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(241, 247, 252, 0.92));
+  border-color: rgba(103, 145, 168, 0.18);
+  box-shadow:
+    0 20px 46px rgba(52, 89, 116, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme='light'] .badge-growth-card h3,
+[data-theme='light'] .badge-growth-node strong,
+[data-theme='light'] .badge-moment-card strong {
+  color: #15313c;
+}
+
+[data-theme='light'] .badge-growth-node {
+  background: rgba(245, 250, 253, 0.95);
+  border-color: rgba(103, 145, 168, 0.16);
+}
+
+[data-theme='light'] .badge-growth-node--earned {
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 102, 0.22), transparent 32%),
+    rgba(255, 255, 255, 0.98);
+}
+
+[data-theme='light'] .badge-growth-meta span,
+[data-theme='light'] .badge-moment-card span,
+[data-theme='light'] .badge-growth-node small,
+[data-theme='light'] .badge-moment-card small {
+  color: #627b8a;
 }
 
 [data-theme='light'] .hero {

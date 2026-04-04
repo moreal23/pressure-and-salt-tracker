@@ -71,6 +71,13 @@ const REPORT_RANGE_OPTIONS = [
   { value: 'all', label: 'All data' },
   { value: 'custom', label: 'Custom range' },
 ]
+const BADGE_GROWTH_STAGES = [
+  { threshold: 1, label: 'Acorn', detail: 'Your first successful day is on the board.' },
+  { threshold: 5, label: 'Sprout', detail: 'A strong routine is starting to form.' },
+  { threshold: 10, label: 'Branch', detail: 'Your consistency is getting easier to see.' },
+  { threshold: 20, label: 'Canopy', detail: 'You have built a real track record.' },
+  { threshold: 35, label: 'Oak', detail: 'This is long-term momentum you can be proud of.' },
+]
 
 function getInitialThemeMode() {
   if (typeof window === 'undefined') {
@@ -179,6 +186,41 @@ function formatDateOnly(value) {
     day: 'numeric',
     year: 'numeric',
   }).format(new Date(value))
+}
+
+function formatMonthYear(value) {
+  const normalizedValue = value.length === 10 ? `${value}T12:00:00` : value
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(normalizedValue))
+}
+
+function buildBadgeMonthGroups(goalBadges) {
+  const sortedBadges = [...goalBadges].sort((left, right) => new Date(left.date) - new Date(right.date))
+
+  return sortedBadges.reduce((groups, badge) => {
+    const key = String(badge.date ?? '').slice(0, 7)
+    const lastGroup = groups[groups.length - 1]
+
+    if (lastGroup?.key === key) {
+      lastGroup.badges.push(badge)
+      return groups
+    }
+
+    groups.push({
+      key,
+      label: formatMonthYear(badge.date),
+      badges: [badge],
+    })
+    return groups
+  }, [])
+}
+
+function getBadgeGrowthStage(count) {
+  return (
+    [...BADGE_GROWTH_STAGES].reverse().find((stage) => count >= stage.threshold) ?? BADGE_GROWTH_STAGES[0]
+  )
 }
 
 function getLocalDayKey(value = new Date()) {
@@ -976,27 +1018,92 @@ function SummaryCard({ title, value, helper, tone = 'neutral' }) {
 }
 
 function GoalBadgesPanel({ goalBadges }) {
+  const badgeCount = goalBadges.length
+  const badgeGroups = buildBadgeMonthGroups(goalBadges)
+  const sortedBadges = badgeGroups.flatMap((group) => group.badges)
+  const firstBadge = sortedBadges[0] ?? null
+  const latestBadge = sortedBadges[sortedBadges.length - 1] ?? null
+  const currentStage = getBadgeGrowthStage(badgeCount)
+  const nextStage = BADGE_GROWTH_STAGES.find((stage) => badgeCount < stage.threshold) ?? null
+
   return (
     <section className="panel">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">Badge Shelf</p>
-          <h2>Successful day badges</h2>
+          <p className="eyebrow">Achievement Tree</p>
+          <h2>Successful day badge journey</h2>
         </div>
         <p className="panel-copy">
-          Each gold badge marks a day when you reached 15,000 steps and stayed within your sodium goal.
+          Every gold badge stays here, so you can see how your strong days have grown over time.
         </p>
       </div>
 
       <div className="badge-summary">
-        <strong>{goalBadges.length}</strong>
-        <span>{goalBadges.length === 1 ? 'gold badge earned' : 'gold badges earned'}</span>
+        <strong>{badgeCount}</strong>
+        <span>{badgeCount === 1 ? 'gold badge earned' : 'gold badges earned'}</span>
       </div>
 
-      {goalBadges.length ? (
-        <div className="badge-grid">
-          {goalBadges.slice(0, 12).map((badge) => (
-            <article key={badge.date} className="badge-card">
+      {badgeCount ? (
+        <>
+          <div className="badge-tree-overview">
+            <article className="badge-growth-card">
+              <div>
+                <p className="eyebrow">Current growth</p>
+                <h3>{currentStage.label}</h3>
+                <p className="panel-copy">{currentStage.detail}</p>
+              </div>
+
+              <div className="badge-growth-track" role="list" aria-label="Badge growth milestones">
+                {BADGE_GROWTH_STAGES.map((stage) => {
+                  const unlocked = badgeCount >= stage.threshold
+                  const isCurrent = currentStage.threshold === stage.threshold
+
+                  return (
+                    <article
+                      key={stage.label}
+                      className={`badge-growth-node${unlocked ? ' badge-growth-node--earned' : ''}${
+                        isCurrent ? ' badge-growth-node--current' : ''
+                      }`}
+                      role="listitem"
+                    >
+                      <span className="badge-growth-node__marker" aria-hidden="true">
+                        *
+                      </span>
+                      <strong>{stage.label}</strong>
+                      <small>{stage.threshold}+ badges</small>
+                    </article>
+                  )
+                })}
+              </div>
+
+              <div className="badge-growth-meta">
+                <span>First badge: {formatDateOnly(firstBadge.date)}</span>
+                <span>Latest badge: {formatDateOnly(latestBadge.date)}</span>
+                <span>
+                  {nextStage
+                    ? `${nextStage.threshold - badgeCount} more to reach ${nextStage.label}.`
+                    : 'Your tree keeps growing with every successful day.'}
+                </span>
+              </div>
+            </article>
+
+            <div className="badge-moment-grid">
+              <article className="badge-moment-card">
+                <span>Root day</span>
+                <strong>{formatDay(firstBadge.date)}</strong>
+                <small>{firstBadge.steps.toLocaleString()} steps</small>
+              </article>
+              <article className="badge-moment-card">
+                <span>Latest branch</span>
+                <strong>{formatDay(latestBadge.date)}</strong>
+                <small>{latestBadge.sodiumTotalMg.toLocaleString()} mg sodium</small>
+              </article>
+            </div>
+          </div>
+
+          <div className="badge-grid badge-grid--tree">
+            {sortedBadges.map((badge) => (
+            <article key={badge.date} className="badge-card badge-card--tree">
               <div className="badge-medal" aria-hidden="true">
                 ★
               </div>
@@ -1006,8 +1113,9 @@ function GoalBadgesPanel({ goalBadges }) {
                 {badge.sodiumTotalMg.toLocaleString()} / {badge.sodiumGoalMg.toLocaleString()} mg
               </small>
             </article>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       ) : (
         <div className="import-hint">
           Your first gold badge will appear here after you reach 15,000 steps and stay within your sodium goal for the day.
