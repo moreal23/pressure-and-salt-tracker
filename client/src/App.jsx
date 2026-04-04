@@ -3175,7 +3175,7 @@ function App() {
     setFoodForm({
       foodName: entry.foodName ?? '',
       servingSize: entry.servingSize ?? '',
-      sodiumMg: entry.sodiumMg ? String(entry.sodiumMg) : '',
+      sodiumMg: entry.sodiumMg != null ? String(entry.sodiumMg) : '',
       mealType: entry.mealType ?? 'Meal',
       barcode: entry.barcode ?? '',
       loggedAt: getLocalDateTimeValue(),
@@ -3858,7 +3858,7 @@ function App() {
     setFoodForm({
       foodName: item.foodName ?? '',
       servingSize: item.servingSize ?? '',
-      sodiumMg: item.sodiumMg ? String(item.sodiumMg) : '',
+      sodiumMg: item.sodiumMg != null ? String(item.sodiumMg) : '',
       mealType: 'Scan',
       barcode: item.barcode ?? '',
       loggedAt: getLocalDateTimeValue(),

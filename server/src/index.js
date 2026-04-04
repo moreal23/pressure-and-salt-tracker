@@ -643,7 +643,7 @@ function parseImportedBloodPressureText(rawText) {
   }
 }
 
-function parseNutrientToMg(value, unit) {
+function parseNutrientToMg(value, unit, defaultUnit = 'mg') {
   if (value == null) {
     return null
   }
@@ -654,7 +654,7 @@ function parseNutrientToMg(value, unit) {
     return null
   }
 
-  const normalizedUnit = String(unit ?? 'mg').toLowerCase()
+  const normalizedUnit = String(unit ?? defaultUnit).toLowerCase()
 
   if (normalizedUnit === 'mg') {
     return Math.round(numericValue)
@@ -690,13 +690,15 @@ function getBarcodeLookupCandidates(barcode) {
 function mapOpenFoodFactsProduct(product, fallbackName = 'Scanned food') {
   const nutriments = product?.nutriments ?? {}
   const sodiumFromSalt =
-    parseNutrientToMg(nutriments.salt_serving, nutriments.salt_serving_unit) ??
-    parseNutrientToMg(nutriments.salt_value, nutriments.salt_unit) ??
-    parseNutrientToMg(nutriments.salt, nutriments.salt_unit)
+    parseNutrientToMg(nutriments.salt_serving, nutriments.salt_serving_unit, 'g') ??
+    parseNutrientToMg(nutriments.salt_value, nutriments.salt_unit, 'g') ??
+    parseNutrientToMg(nutriments.salt, nutriments.salt_unit, 'g') ??
+    parseNutrientToMg(nutriments.salt_100g, nutriments.salt_unit, 'g')
   const sodiumMg =
-    parseNutrientToMg(nutriments.sodium_serving, nutriments.sodium_serving_unit) ??
-    parseNutrientToMg(nutriments.sodium_value, nutriments.sodium_unit) ??
-    parseNutrientToMg(nutriments.sodium, nutriments.sodium_unit) ??
+    parseNutrientToMg(nutriments.sodium_serving, nutriments.sodium_serving_unit, 'g') ??
+    parseNutrientToMg(nutriments.sodium_value, nutriments.sodium_unit, 'g') ??
+    parseNutrientToMg(nutriments.sodium, nutriments.sodium_unit, 'g') ??
+    parseNutrientToMg(nutriments.sodium_100g, nutriments.sodium_unit, 'g') ??
     (sodiumFromSalt != null ? Math.round(sodiumFromSalt * 0.393) : null)
 
   if (sodiumMg == null || Number.isNaN(sodiumMg)) {
