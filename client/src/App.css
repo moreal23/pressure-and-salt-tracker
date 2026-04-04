@@ -575,10 +575,12 @@ textarea {
 
 .password-field input {
   flex: 1;
+  min-width: 0;
 }
 
 .password-toggle {
   min-width: 84px;
+  flex: 0 0 auto;
 }
 
 .panel--scanner .scanner-shell {
@@ -2133,6 +2135,16 @@ select:focus {
 
   .button {
     width: 100%;
+  }
+
+  .password-field {
+    align-items: stretch;
+  }
+
+  .password-field .password-toggle {
+    width: auto;
+    min-width: 92px;
+    flex: 0 0 auto;
   }
 
   .theme-toggle {
