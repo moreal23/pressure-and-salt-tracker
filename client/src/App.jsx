@@ -2740,6 +2740,17 @@ function App() {
       medicationSupplies.filter((entry) => Number(entry.tabletsRemaining ?? 0) <= Number(entry.lowThreshold ?? 0)),
     [medicationSupplies]
   )
+  const primaryMedicationSupply = useMemo(() => {
+    if (!medicationSupplies.length) {
+      return null
+    }
+
+    return [...medicationSupplies].sort((left, right) => {
+      const leftSummary = buildMedicationSupplySummary(left)
+      const rightSummary = buildMedicationSupplySummary(right)
+      return leftSummary.estimatedDaysLeft - rightSummary.estimatedDaysLeft
+    })[0]
+  }, [medicationSupplies])
   const recentFoods = useMemo(() => buildRecentFoodChoices(history.foodLogs), [history.foodLogs])
   const fitbitChartData = useMemo(
     () => buildFitbitChartData(fitbit.history, fitbit.summary),
@@ -4041,6 +4052,20 @@ function App() {
           value={String(dashboard.weeklySummary.totalEntries)}
           helper="Blood pressure and food logs combined"
           tone="neutral"
+        />
+        <SummaryCard
+          title="Medicine Left"
+          value={
+            primaryMedicationSupply
+              ? `${primaryMedicationSupply.tabletsRemaining}`
+              : 'Not set'
+          }
+          helper={
+            primaryMedicationSupply
+              ? `${primaryMedicationSupply.medicationName} • ${buildMedicationSupplySummary(primaryMedicationSupply).message}`
+              : 'Add your medicine supply below so the count updates automatically.'
+          }
+          tone={primaryMedicationSupply ? buildMedicationSupplySummary(primaryMedicationSupply).tone : 'neutral'}
         />
       </section>
 
