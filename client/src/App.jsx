@@ -63,6 +63,16 @@ const CELEBRATION_STEPS_GOAL = 15000
 const REMINDER_CHECK_INTERVAL_MS = 30_000
 const AUTO_LOCK_AFTER_MS = 5 * 60_000
 const PRIVACY_UNLOCK_KEY = 'pressure-salt-unlocked'
+const THEME_STORAGE_KEY = 'pressure-salt-theme'
+
+function getInitialThemeMode() {
+  if (typeof window === 'undefined') {
+    return 'dark'
+  }
+
+  const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
+  return savedTheme === 'light' ? 'light' : 'dark'
+}
 
 function formatImportDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -572,11 +582,39 @@ async function fetchJson(path, options) {
   return body
 }
 
+function ThemeToggle({ themeMode, onChange, compact = false }) {
+  return (
+    <section className={`theme-toggle${compact ? ' theme-toggle--compact' : ''}`} aria-label="Theme settings">
+      <span className="theme-toggle__label">Theme</span>
+      <div className="theme-toggle__buttons" role="group" aria-label="Choose dark or light mode">
+        <button
+          className={`theme-toggle__button${themeMode === 'dark' ? ' is-active' : ''}`}
+          type="button"
+          onClick={() => onChange('dark')}
+          aria-pressed={themeMode === 'dark'}
+        >
+          Dark
+        </button>
+        <button
+          className={`theme-toggle__button${themeMode === 'light' ? ' is-active' : ''}`}
+          type="button"
+          onClick={() => onChange('light')}
+          aria-pressed={themeMode === 'light'}
+        >
+          Light
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function AuthScreen({
   mode,
   authState,
   setAuthState,
   onSubmit,
+  themeMode,
+  setThemeMode,
 }) {
   const [showPassword, setShowPassword] = useState(false)
   const isRegister = mode === 'register'
@@ -584,6 +622,7 @@ function AuthScreen({
   return (
     <main className="app-shell loading-shell">
       <div className="loading-card privacy-lock-card">
+        <ThemeToggle themeMode={themeMode} onChange={setThemeMode} compact />
         <p className="eyebrow">{isRegister ? 'Create Account' : 'Sign In'}</p>
         <h1>{isRegister ? 'Set up your private account' : 'Sign in to your health tracker'}</h1>
         <p>
@@ -2392,6 +2431,7 @@ function ScannerPanel({ onLookupComplete, lookupState, setLookupState }) {
 
 function App() {
   const [dashboard, setDashboard] = useState(null)
+  const [themeMode, setThemeMode] = useState(getInitialThemeMode)
   const [authState, setAuthState] = useState({
     checking: true,
     hasAccount: false,
@@ -2641,6 +2681,12 @@ function App() {
       setNotificationPermission(Notification.permission)
     }
   }, [])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode
+    document.documentElement.style.colorScheme = themeMode
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode)
+  }, [themeMode])
 
   const sodiumTone = useMemo(() => {
     if (!dashboard) {
@@ -3845,6 +3891,8 @@ function App() {
         authState={authState}
         setAuthState={setAuthState}
         onSubmit={authState.hasAccount ? handleLogin : handleRegister}
+        themeMode={themeMode}
+        setThemeMode={setThemeMode}
       />
     )
   }
@@ -3894,19 +3942,22 @@ function App() {
             <span>Medication reminders</span>
             <span>Barcode food scan</span>
           </div>
-          <div className="install-strip">
-            <button
-              className="button button--install"
-              type="button"
-              onClick={handleInstallClick}
-              disabled={isInstalled}
-            >
-              {isInstalled ? 'Installed on phone' : 'Install on phone'}
-            </button>
-            <p>
-              {installMessage ||
-                'After deployment on HTTPS, this can be installed from your phone browser.'}
-            </p>
+          <div className="hero-controls">
+            <div className="install-strip">
+              <button
+                className="button button--install"
+                type="button"
+                onClick={handleInstallClick}
+                disabled={isInstalled}
+              >
+                {isInstalled ? 'Installed on phone' : 'Install on phone'}
+              </button>
+              <p>
+                {installMessage ||
+                  'After deployment on HTTPS, this can be installed from your phone browser.'}
+              </p>
+            </div>
+            <ThemeToggle themeMode={themeMode} onChange={setThemeMode} />
           </div>
         </div>
 
